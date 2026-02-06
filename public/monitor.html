@@ -24,6 +24,14 @@
             <span class="info-label">Calidad de transmision</span>
             <span class="info-value" id="deviceQuality">Desconocida</span>
           </div>
+          <div class="overlay-card">
+            <span class="info-label">FPS en vivo</span>
+            <span class="info-value" id="liveFps">--</span>
+          </div>
+          <div class="overlay-card">
+            <span class="info-label">Latencia</span>
+            <span class="info-value" id="liveLatency">--</span>
+          </div>
         </div>
       </section>
 
@@ -46,6 +54,8 @@
       const refreshBtn = document.getElementById("refreshBtn");
       const deviceIp = document.getElementById("deviceIp");
       const deviceQuality = document.getElementById("deviceQuality");
+      const liveFps = document.getElementById("liveFps");
+      const liveLatency = document.getElementById("liveLatency");
       const logsSection = document.getElementById("logsSection");
       const logsContent = document.getElementById("logsContent");
       const logs = [];
@@ -53,6 +63,10 @@
       let liveActive = false;
       let lastFrameLog = 0;
       let lastStoredSize = 0;
+      let lastObjectUrl = null;
+      let lastFrameAt = 0;
+      let smoothedFps = 0;
+      let lastMeta = null;
 
       const params = new URLSearchParams(window.location.search);
       const showLogs = params.get("logs") === "1";
@@ -85,6 +99,23 @@
           renderLogs(logs);
         }
         persistLogs();
+      }
+
+      function updateStats(now) {
+        if (lastFrameAt) {
+          const delta = now - lastFrameAt;
+          if (delta > 0) {
+            const instantFps = 1000 / delta;
+            smoothedFps = smoothedFps ? (smoothedFps * 0.85 + instantFps * 0.15) : instantFps;
+            liveFps.textContent = smoothedFps.toFixed(1);
+          }
+        }
+        lastFrameAt = now;
+
+        if (lastMeta && typeof lastMeta.ts === "number") {
+          const latency = Math.max(0, now - lastMeta.ts);
+          liveLatency.textContent = `${latency} ms`;
+        }
       }
 
       function refresh() {
@@ -120,6 +151,24 @@
         });
 
         socket.addEventListener("message", (event) => {
+          if (event.data instanceof Blob) {
+            liveActive = true;
+            stopPolling();
+            if (lastObjectUrl) {
+              URL.revokeObjectURL(lastObjectUrl);
+            }
+            lastObjectUrl = URL.createObjectURL(event.data);
+            img.src = lastObjectUrl;
+            updateStats(Date.now());
+            setStatus("En vivo: " + new Date().toLocaleTimeString());
+            const now = Date.now();
+            if (now - lastFrameLog > 2000) {
+              addLog("Frame en vivo recibido.");
+              lastFrameLog = now;
+            }
+            return;
+          }
+
           let payload = null;
           try {
             payload = JSON.parse(event.data);
@@ -127,11 +176,22 @@
             return;
           }
 
+          if (payload && payload.type === "meta" && payload.meta) {
+            lastMeta = payload.meta;
+            deviceIp.textContent = payload.meta.ip || "Desconocida";
+            deviceQuality.textContent = payload.meta.quality
+              ? `${payload.meta.quality}${payload.meta.mode ? " (" + payload.meta.mode + ")" : ""}`
+              : "Desconocida";
+            return;
+          }
+
           if (payload && payload.type === "frame" && payload.dataUrl) {
             liveActive = true;
             stopPolling();
             img.src = payload.dataUrl;
+            updateStats(Date.now());
             if (payload.meta) {
+              lastMeta = payload.meta;
               deviceIp.textContent = payload.meta.ip || "Desconocida";
               deviceQuality.textContent = payload.meta.quality
                 ? `${payload.meta.quality}${payload.meta.mode ? " (" + payload.meta.mode + ")" : ""}`

@@ -53,7 +53,9 @@ const server = https.createServer({
 }, app);
 
 const wss = new WebSocketServer({ server });
+const MAX_BUFFERED_BYTES = 2_000_000;
 let lastFrameDataUrl = null;
+let lastFrameBinary = null;
 let lastFrameMeta = null;
 
 function normalizeIp(address) {
@@ -66,16 +68,24 @@ function normalizeIp(address) {
   return address;
 }
 
-function broadcast(data, exceptSocket) {
+function broadcast(data, exceptSocket, isBinary = false) {
   wss.clients.forEach((client) => {
     if (client !== exceptSocket && client.readyState === client.OPEN) {
-      client.send(data);
+      if (client.bufferedAmount > MAX_BUFFERED_BYTES) {
+        return;
+      }
+      client.send(data, isBinary ? { binary: true } : undefined);
     }
   });
 }
 
 wss.on("connection", (socket) => {
-  if (lastFrameDataUrl) {
+  if (lastFrameMeta) {
+    socket.send(JSON.stringify({ type: "meta", meta: lastFrameMeta }));
+  }
+  if (lastFrameBinary) {
+    socket.send(lastFrameBinary, { binary: true });
+  } else if (lastFrameDataUrl) {
     socket.send(JSON.stringify({
       type: "frame",
       dataUrl: lastFrameDataUrl,
@@ -83,7 +93,14 @@ wss.on("connection", (socket) => {
     }));
   }
 
-  socket.on("message", (raw) => {
+  socket.on("message", (raw, isBinary) => {
+    if (isBinary && Buffer.isBuffer(raw)) {
+      lastFrameBinary = raw;
+      lastFrameDataUrl = null;
+      broadcast(raw, socket, true);
+      return;
+    }
+
     let dataUrl = null;
     let meta = null;
     const text = raw.toString();
@@ -101,6 +118,16 @@ wss.on("connection", (socket) => {
             mode: payload.mode || null
           };
         }
+        if (payload && payload.type === "meta" && payload.meta) {
+          lastFrameMeta = {
+            ip: normalizeIp(socket?._socket?.remoteAddress),
+            quality: payload.meta.quality || "Desconocida",
+            mode: payload.meta.mode || null,
+            ts: typeof payload.meta.ts === "number" ? payload.meta.ts : null
+          };
+          broadcast(JSON.stringify({ type: "meta", meta: lastFrameMeta }), socket);
+          return;
+        }
       } catch (_error) {
         return;
       }
@@ -111,6 +138,7 @@ wss.on("connection", (socket) => {
     }
 
     lastFrameDataUrl = dataUrl;
+    lastFrameBinary = null;
     if (meta) {
       lastFrameMeta = meta;
     }

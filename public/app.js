@@ -11,31 +11,33 @@ let usingFront = false;
 let liveTimer = null;
 let liveSocket = null;
 let qualityChangeInProgress = false;
+const MAX_BUFFERED_BYTES = 2_000_000;
+const USE_BINARY_FRAMES = true;
 
 const QUALITY_PRESETS = {
   low: {
     label: "Baja",
-    width: 640,
-    height: 360,
-    frameRate: 15,
-    jpegQuality: 0.7,
-    intervalMs: 200
+    width: 480,
+    height: 270,
+    frameRate: 12,
+    jpegQuality: 0.6,
+    intervalMs: 120
   },
   medium: {
     label: "Media",
-    width: 1280,
-    height: 720,
-    frameRate: 24,
-    jpegQuality: 0.85,
-    intervalMs: 120
+    width: 960,
+    height: 540,
+    frameRate: 18,
+    jpegQuality: 0.75,
+    intervalMs: 100
   },
   high: {
     label: "Alta",
-    width: 1920,
-    height: 1080,
-    frameRate: 30,
-    jpegQuality: 0.92,
-    intervalMs: 100
+    width: 1280,
+    height: 720,
+    frameRate: 24,
+    jpegQuality: 0.82,
+    intervalMs: 80
   }
 };
 
@@ -118,6 +120,29 @@ function captureDataUrl() {
   return canvas.toDataURL("image/jpeg", preset.jpegQuality);
 }
 
+function captureBlob() {
+  if (!stream) {
+    return null;
+  }
+  const track = stream.getVideoTracks()[0];
+  const settings = track.getSettings();
+  const preset = QUALITY_PRESETS[currentQuality];
+  const width = settings.width || preset.width;
+  const height = settings.height || preset.height;
+
+  const targetWidth = Math.min(width, preset.width);
+  const targetHeight = Math.round(height * (targetWidth / width));
+
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
+
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), "image/jpeg", preset.jpegQuality);
+  });
+}
+
 function openLiveSocket() {
   if (liveSocket) {
     return;
@@ -144,37 +169,61 @@ function startLiveStream() {
   }
 
   openLiveSocket();
-  liveTimer = setInterval(() => {
+  const runLoop = async () => {
     if (!stream || !liveSocket || liveSocket.readyState !== WebSocket.OPEN) {
+      liveTimer = setTimeout(runLoop, QUALITY_PRESETS[currentQuality].intervalMs);
+      return;
+    }
+    if (liveSocket.bufferedAmount > MAX_BUFFERED_BYTES) {
+      liveTimer = setTimeout(runLoop, QUALITY_PRESETS[currentQuality].intervalMs);
       return;
     }
     if (video.readyState < 2) {
+      liveTimer = setTimeout(runLoop, QUALITY_PRESETS[currentQuality].intervalMs);
       return;
     }
     const startedAt = performance.now();
-    const dataUrl = captureDataUrl();
+    const dataUrl = USE_BINARY_FRAMES ? null : captureDataUrl();
+    const blob = USE_BINARY_FRAMES ? await captureBlob() : null;
     const encodedAt = performance.now();
     autoMetrics.encodeMs = encodedAt - startedAt;
-    if (dataUrl) {
-      const sinceLast = autoMetrics.lastFrameAt ? (startedAt - autoMetrics.lastFrameAt) : 0;
-      autoMetrics.lastFrameAt = startedAt;
-      autoMetrics.sendDelayMs = sinceLast;
-      const preset = QUALITY_PRESETS[currentQuality];
-      const mode = autoQuality ? "Auto" : "Manual";
-      const qualityLabel = preset ? preset.label : "Desconocida";
-      liveSocket.send(JSON.stringify({
-        type: "frame",
-        dataUrl,
-        quality: qualityLabel,
-        mode
-      }));
+    if (dataUrl || blob) {
+      if (liveSocket.bufferedAmount <= MAX_BUFFERED_BYTES) {
+        const sinceLast = autoMetrics.lastFrameAt ? (startedAt - autoMetrics.lastFrameAt) : 0;
+        autoMetrics.lastFrameAt = startedAt;
+        autoMetrics.sendDelayMs = sinceLast;
+        const preset = QUALITY_PRESETS[currentQuality];
+        const mode = autoQuality ? "Auto" : "Manual";
+        const qualityLabel = preset ? preset.label : "Desconocida";
+        liveSocket.send(JSON.stringify({
+          type: "meta",
+          meta: {
+            quality: qualityLabel,
+            mode,
+            ts: Date.now()
+          }
+        }));
+        if (blob) {
+          liveSocket.send(blob);
+        } else if (dataUrl) {
+          liveSocket.send(JSON.stringify({
+            type: "frame",
+            dataUrl,
+            quality: qualityLabel,
+            mode
+          }));
+        }
+      }
     }
-  }, QUALITY_PRESETS[currentQuality].intervalMs);
+    liveTimer = setTimeout(runLoop, QUALITY_PRESETS[currentQuality].intervalMs);
+  };
+
+  runLoop();
 }
 
 function restartLiveInterval() {
   if (liveTimer) {
-    clearInterval(liveTimer);
+    clearTimeout(liveTimer);
     liveTimer = null;
   }
   if (stream) {
@@ -184,7 +233,7 @@ function restartLiveInterval() {
 
 function stopLiveStream() {
   if (liveTimer) {
-    clearInterval(liveTimer);
+    clearTimeout(liveTimer);
     liveTimer = null;
   }
   if (liveSocket) {
