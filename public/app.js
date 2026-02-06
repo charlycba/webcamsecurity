@@ -10,6 +10,7 @@ let stream = null;
 let usingFront = false;
 let liveTimer = null;
 let liveSocket = null;
+let qualityChangeInProgress = false;
 
 const QUALITY_PRESETS = {
   low: {
@@ -158,9 +159,27 @@ function startLiveStream() {
       const sinceLast = autoMetrics.lastFrameAt ? (startedAt - autoMetrics.lastFrameAt) : 0;
       autoMetrics.lastFrameAt = startedAt;
       autoMetrics.sendDelayMs = sinceLast;
-      liveSocket.send(JSON.stringify({ type: "frame", dataUrl }));
+      const preset = QUALITY_PRESETS[currentQuality];
+      const mode = autoQuality ? "Auto" : "Manual";
+      const qualityLabel = preset ? preset.label : "Desconocida";
+      liveSocket.send(JSON.stringify({
+        type: "frame",
+        dataUrl,
+        quality: qualityLabel,
+        mode
+      }));
     }
   }, QUALITY_PRESETS[currentQuality].intervalMs);
+}
+
+function restartLiveInterval() {
+  if (liveTimer) {
+    clearInterval(liveTimer);
+    liveTimer = null;
+  }
+  if (stream) {
+    startLiveStream();
+  }
 }
 
 function stopLiveStream() {
@@ -179,12 +198,37 @@ function applyQuality(key) {
   qualityIndex = QUALITY_ORDER.indexOf(key);
 }
 
-async function reconfigureQuality(key) {
-  applyQuality(key);
-  if (stream) {
-    stopCamera();
-    await startCamera();
+async function applyStreamQuality(key) {
+  if (qualityChangeInProgress) {
+    return;
   }
+
+  const preset = QUALITY_PRESETS[key];
+  if (!preset) {
+    return;
+  }
+
+  qualityChangeInProgress = true;
+  applyQuality(key);
+
+  if (stream) {
+    const track = stream.getVideoTracks()[0];
+    if (track && typeof track.applyConstraints === "function") {
+      try {
+        await track.applyConstraints({
+          width: { ideal: preset.width },
+          height: { ideal: preset.height },
+          frameRate: { ideal: preset.frameRate, max: preset.frameRate }
+        });
+      } catch (error) {
+        console.warn("No se pudo ajustar la calidad en vivo.", error);
+      }
+    }
+  }
+
+  restartLiveInterval();
+  setStatus(`Calidad ${preset.label}${autoQuality ? " (Auto)" : ""}.`);
+  qualityChangeInProgress = false;
 }
 
 function autoTuneQuality() {
@@ -202,13 +246,13 @@ function autoTuneQuality() {
 
   if (shouldDecrease && qualityIndex > 0) {
     qualityIndex -= 1;
-    reconfigureQuality(QUALITY_ORDER[qualityIndex]);
+    applyStreamQuality(QUALITY_ORDER[qualityIndex]);
     return;
   }
 
   if (shouldIncrease && qualityIndex < QUALITY_ORDER.length - 1) {
     qualityIndex += 1;
-    reconfigureQuality(QUALITY_ORDER[qualityIndex]);
+    applyStreamQuality(QUALITY_ORDER[qualityIndex]);
   }
 }
 
@@ -220,10 +264,10 @@ qualitySelect.addEventListener("change", async (event) => {
   const value = event.target.value;
   autoQuality = value === "auto";
   if (autoQuality) {
-    await reconfigureQuality(QUALITY_ORDER[qualityIndex]);
+    await applyStreamQuality(QUALITY_ORDER[qualityIndex]);
     return;
   }
-  await reconfigureQuality(value);
+  await applyStreamQuality(value);
 });
 
 setInterval(autoTuneQuality, 3000);

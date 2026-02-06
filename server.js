@@ -54,6 +54,17 @@ const server = https.createServer({
 
 const wss = new WebSocketServer({ server });
 let lastFrameDataUrl = null;
+let lastFrameMeta = null;
+
+function normalizeIp(address) {
+  if (!address) {
+    return "Desconocida";
+  }
+  if (address.startsWith("::ffff:")) {
+    return address.slice(7);
+  }
+  return address;
+}
 
 function broadcast(data, exceptSocket) {
   wss.clients.forEach((client) => {
@@ -65,11 +76,16 @@ function broadcast(data, exceptSocket) {
 
 wss.on("connection", (socket) => {
   if (lastFrameDataUrl) {
-    socket.send(JSON.stringify({ type: "frame", dataUrl: lastFrameDataUrl }));
+    socket.send(JSON.stringify({
+      type: "frame",
+      dataUrl: lastFrameDataUrl,
+      meta: lastFrameMeta
+    }));
   }
 
   socket.on("message", (raw) => {
     let dataUrl = null;
+    let meta = null;
     const text = raw.toString();
 
     if (text.startsWith("data:image/")) {
@@ -79,6 +95,11 @@ wss.on("connection", (socket) => {
         const payload = JSON.parse(text);
         if (payload && payload.type === "frame" && typeof payload.dataUrl === "string") {
           dataUrl = payload.dataUrl;
+          meta = {
+            ip: normalizeIp(socket?._socket?.remoteAddress),
+            quality: payload.quality || "Desconocida",
+            mode: payload.mode || null
+          };
         }
       } catch (_error) {
         return;
@@ -90,7 +111,10 @@ wss.on("connection", (socket) => {
     }
 
     lastFrameDataUrl = dataUrl;
-    broadcast(JSON.stringify({ type: "frame", dataUrl }), socket);
+    if (meta) {
+      lastFrameMeta = meta;
+    }
+    broadcast(JSON.stringify({ type: "frame", dataUrl, meta: lastFrameMeta }), socket);
   });
 });
 

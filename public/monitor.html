@@ -15,10 +15,26 @@
 
       <section class="viewer">
         <img id="latest" alt="Ultimo snapshot" />
+        <div class="overlay" aria-live="polite">
+          <div class="overlay-card">
+            <span class="info-label">IP del dispositivo</span>
+            <span class="info-value" id="deviceIp">Desconocida</span>
+          </div>
+          <div class="overlay-card">
+            <span class="info-label">Calidad de transmision</span>
+            <span class="info-value" id="deviceQuality">Desconocida</span>
+          </div>
+        </div>
       </section>
 
       <section class="controls">
         <button id="refreshBtn">Refrescar</button>
+        <a id="openLogs" href="/monitor.html?logs=1" target="_blank" rel="noopener">Ver logs</a>
+      </section>
+
+      <section class="logs hidden" id="logsSection">
+        <h2>Logs de transmision</h2>
+        <pre id="logsContent"></pre>
       </section>
 
       <section class="status" id="status"></section>
@@ -28,17 +44,54 @@
       const img = document.getElementById("latest");
       const status = document.getElementById("status");
       const refreshBtn = document.getElementById("refreshBtn");
+      const deviceIp = document.getElementById("deviceIp");
+      const deviceQuality = document.getElementById("deviceQuality");
+      const logsSection = document.getElementById("logsSection");
+      const logsContent = document.getElementById("logsContent");
+      const logs = [];
       let pollTimer = null;
       let liveActive = false;
+      let lastFrameLog = 0;
+      let lastStoredSize = 0;
+
+      const params = new URLSearchParams(window.location.search);
+      const showLogs = params.get("logs") === "1";
+
+      if (showLogs) {
+        logsSection.classList.remove("hidden");
+      }
 
       function setStatus(message) {
         status.textContent = message;
+      }
+
+      function formatLog(message) {
+        const time = new Date().toLocaleTimeString();
+        return `[${time}] ${message}`;
+      }
+
+      function persistLogs() {
+        localStorage.setItem("monitorLogs", JSON.stringify(logs.slice(-200)));
+      }
+
+      function renderLogs(entries) {
+        logsContent.textContent = entries.join("\n");
+      }
+
+      function addLog(message) {
+        const entry = formatLog(message);
+        logs.push(entry);
+        if (showLogs) {
+          renderLogs(logs);
+        }
+        persistLogs();
       }
 
       function refresh() {
         const ts = Date.now();
         img.src = `/snapshots/latest.jpg?ts=${ts}`;
         setStatus("Snapshot: " + new Date().toLocaleTimeString());
+        addLog("Snapshot refrescado.");
       }
 
       function startPolling() {
@@ -47,6 +100,7 @@
         }
         refresh();
         pollTimer = setInterval(refresh, 5000);
+        addLog("Fallback a snapshots cada 5s.");
       }
 
       function stopPolling() {
@@ -62,6 +116,7 @@
 
         socket.addEventListener("open", () => {
           setStatus("Conectado a streaming en vivo.");
+          addLog("Conectado a streaming en vivo.");
         });
 
         socket.addEventListener("message", (event) => {
@@ -76,7 +131,18 @@
             liveActive = true;
             stopPolling();
             img.src = payload.dataUrl;
+            if (payload.meta) {
+              deviceIp.textContent = payload.meta.ip || "Desconocida";
+              deviceQuality.textContent = payload.meta.quality
+                ? `${payload.meta.quality}${payload.meta.mode ? " (" + payload.meta.mode + ")" : ""}`
+                : "Desconocida";
+            }
             setStatus("En vivo: " + new Date().toLocaleTimeString());
+            const now = Date.now();
+            if (now - lastFrameLog > 2000) {
+              addLog("Frame en vivo recibido.");
+              lastFrameLog = now;
+            }
           }
         });
 
@@ -84,11 +150,13 @@
           if (liveActive) {
             setStatus("Streaming desconectado, usando snapshots.");
           }
+          addLog("Streaming desconectado.");
           startPolling();
         });
 
         socket.addEventListener("error", () => {
           setStatus("Error en streaming, usando snapshots.");
+          addLog("Error en streaming.");
           startPolling();
         });
       }
@@ -96,6 +164,25 @@
       refreshBtn.addEventListener("click", refresh);
       connectLive();
       startPolling();
+
+      if (showLogs) {
+        setInterval(() => {
+          const stored = localStorage.getItem("monitorLogs");
+          if (!stored) {
+            return;
+          }
+          if (stored.length === lastStoredSize) {
+            return;
+          }
+          lastStoredSize = stored.length;
+          try {
+            const entries = JSON.parse(stored);
+            renderLogs(entries);
+          } catch (_error) {
+            return;
+          }
+        }, 1000);
+      }
     </script>
   </body>
 </html>
