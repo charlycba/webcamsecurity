@@ -60,8 +60,7 @@ img {
   margin-bottom: 12px;
 }
 
-button,
-.toggle {
+button {
   border: 0;
   background: var(--accent);
   color: #fff;
@@ -75,13 +74,6 @@ button,
 button[disabled] {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-.toggle {
-  background: var(--accent-2);
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .select {
@@ -101,16 +93,6 @@ button[disabled] {
   font-size: 0.95rem;
 }
 
-.toggle input {
-  width: 18px;
-  height: 18px;
-}
-
-a {
-  color: var(--accent-2);
-  text-decoration: none;
-  font-weight: 600;
-}
 
 .status {
   font-size: 0.95rem;
@@ -130,7 +112,7 @@ a {
   }
 
   button,
-  .toggle {
+  .select {
     width: 100%;
     justify-content: center;
   }

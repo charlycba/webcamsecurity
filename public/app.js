@@ -3,14 +3,11 @@ const canvas = document.getElementById("canvas");
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
 const switchBtn = document.getElementById("switchBtn");
-const snapshotBtn = document.getElementById("snapshotBtn");
-const autoUpload = document.getElementById("autoUpload");
 const qualitySelect = document.getElementById("qualitySelect");
 const statusEl = document.getElementById("status");
 
 let stream = null;
 let usingFront = false;
-let uploadTimer = null;
 let liveTimer = null;
 let liveSocket = null;
 
@@ -73,7 +70,6 @@ async function startCamera() {
     startBtn.disabled = true;
     stopBtn.disabled = false;
     switchBtn.disabled = false;
-    snapshotBtn.disabled = false;
     startLiveStream();
     setStatus("Camara activa.");
   } catch (error) {
@@ -91,8 +87,6 @@ function stopCamera() {
   startBtn.disabled = false;
   stopBtn.disabled = true;
   switchBtn.disabled = true;
-  snapshotBtn.disabled = true;
-  stopAutoUpload();
   stopLiveStream();
   setStatus("Camara detenida.");
 }
@@ -121,43 +115,6 @@ function captureDataUrl() {
   const ctx = canvas.getContext("2d");
   ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
   return canvas.toDataURL("image/jpeg", preset.jpegQuality);
-}
-
-async function uploadSnapshot() {
-  const dataUrl = captureDataUrl();
-  if (!dataUrl) {
-    return;
-  }
-
-  try {
-    const res = await fetch("/api/snapshot", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dataUrl })
-    });
-
-    if (!res.ok) {
-      throw new Error("upload failed");
-    }
-    setStatus("Snapshot enviado.");
-  } catch (error) {
-    console.error(error);
-    setStatus("Fallo al enviar snapshot.");
-  }
-}
-
-function startAutoUpload() {
-  stopAutoUpload();
-  uploadTimer = setInterval(uploadSnapshot, 5000);
-  setStatus("Auto snapshot activo.");
-}
-
-function stopAutoUpload() {
-  if (uploadTimer) {
-    clearInterval(uploadTimer);
-    uploadTimer = null;
-  }
-  autoUpload.checked = false;
 }
 
 function openLiveSocket() {
@@ -258,14 +215,6 @@ function autoTuneQuality() {
 startBtn.addEventListener("click", startCamera);
 stopBtn.addEventListener("click", stopCamera);
 switchBtn.addEventListener("click", switchCamera);
-snapshotBtn.addEventListener("click", uploadSnapshot);
-autoUpload.addEventListener("change", (event) => {
-  if (event.target.checked) {
-    startAutoUpload();
-  } else {
-    stopAutoUpload();
-  }
-});
 
 qualitySelect.addEventListener("change", async (event) => {
   const value = event.target.value;
