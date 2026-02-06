@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Camara Seguridad</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <h1>Camara de Seguridad</h1>
+        <p>Usa tu telefono como camara en la red local.</p>
+      </header>
+
+      <section class="viewer">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas" class="hidden"></canvas>
+      </section>
+
+      <section class="controls">
+        <button id="startBtn">Iniciar camara</button>
+        <button id="stopBtn" disabled>Detener</button>
+        <button id="switchBtn" disabled>Cambiar camara</button>
+      </section>
+
+      <section class="extras">
+        <label class="toggle">
+          <input type="checkbox" id="autoUpload" />
+          Subir snapshots cada 5s
+        </label>
+        <button id="snapshotBtn" disabled>Snapshot manual</button>
+        <a href="/monitor.html" target="_blank" rel="noopener">Abrir monitor</a>
+      </section>
+
+      <section class="status" id="status"></section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

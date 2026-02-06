@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Monitor</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <h1>Monitor</h1>
+        <p>Ultimo snapshot recibido.</p>
+      </header>
+
+      <section class="viewer">
+        <img id="latest" alt="Ultimo snapshot" />
+      </section>
+
+      <section class="controls">
+        <button id="refreshBtn">Refrescar</button>
+      </section>
+
+      <section class="status" id="status"></section>
+    </main>
+
+    <script>
+      const img = document.getElementById("latest");
+      const status = document.getElementById("status");
+      const refreshBtn = document.getElementById("refreshBtn");
+
+      function refresh() {
+        const ts = Date.now();
+        img.src = `/snapshots/latest.jpg?ts=${ts}`;
+        status.textContent = "Actualizado: " + new Date().toLocaleTimeString();
+      }
+
+      refreshBtn.addEventListener("click", refresh);
+      refresh();
+      setInterval(refresh, 5000);
+    </script>
+  </body>
+</html>
