@@ -35,8 +35,13 @@ https://IP_DEL_HOST:8443/monitor.html
 ## Como funciona
 - La pagina web usa `navigator.mediaDevices.getUserMedia()` para pedir permiso de camara.
 - El video se muestra en un `<video>` en tiempo real.
+- El navegador envia frames por WebSocket para streaming en vivo.
 - Si activas snapshots, el navegador captura un frame con `<canvas>` y lo envia al backend.
 - El backend guarda el ultimo snapshot en `/snapshots/latest.jpg` para el monitor.
+
+## Streaming en vivo
+- El monitor usa WebSocket para mostrar video en vivo.
+- Si el streaming no esta disponible, cae a snapshots cada 5s.
 
 ## Nota sobre HTTPS
 La API de camara requiere HTTPS (o localhost). En la LAN necesitas un certificado TLS. Puedes:

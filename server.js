@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const https = require("https");
 const express = require("express");
+const { WebSocketServer } = require("ws");
 
 const app = express();
 const port = Number(process.env.PORT || 8443);
@@ -50,6 +51,48 @@ const server = https.createServer({
   cert: fs.readFileSync(certPath),
   key: fs.readFileSync(keyPath)
 }, app);
+
+const wss = new WebSocketServer({ server });
+let lastFrameDataUrl = null;
+
+function broadcast(data, exceptSocket) {
+  wss.clients.forEach((client) => {
+    if (client !== exceptSocket && client.readyState === client.OPEN) {
+      client.send(data);
+    }
+  });
+}
+
+wss.on("connection", (socket) => {
+  if (lastFrameDataUrl) {
+    socket.send(JSON.stringify({ type: "frame", dataUrl: lastFrameDataUrl }));
+  }
+
+  socket.on("message", (raw) => {
+    let dataUrl = null;
+    const text = raw.toString();
+
+    if (text.startsWith("data:image/")) {
+      dataUrl = text;
+    } else {
+      try {
+        const payload = JSON.parse(text);
+        if (payload && payload.type === "frame" && typeof payload.dataUrl === "string") {
+          dataUrl = payload.dataUrl;
+        }
+      } catch (_error) {
+        return;
+      }
+    }
+
+    if (!dataUrl) {
+      return;
+    }
+
+    lastFrameDataUrl = dataUrl;
+    broadcast(JSON.stringify({ type: "frame", dataUrl }), socket);
+  });
+});
 
 server.listen(port, "0.0.0.0", () => {
   console.log(`HTTPS server listening on port ${port}`);

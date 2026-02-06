@@ -28,16 +28,74 @@
       const img = document.getElementById("latest");
       const status = document.getElementById("status");
       const refreshBtn = document.getElementById("refreshBtn");
+      let pollTimer = null;
+      let liveActive = false;
+
+      function setStatus(message) {
+        status.textContent = message;
+      }
 
       function refresh() {
         const ts = Date.now();
         img.src = `/snapshots/latest.jpg?ts=${ts}`;
-        status.textContent = "Actualizado: " + new Date().toLocaleTimeString();
+        setStatus("Snapshot: " + new Date().toLocaleTimeString());
+      }
+
+      function startPolling() {
+        if (pollTimer) {
+          return;
+        }
+        refresh();
+        pollTimer = setInterval(refresh, 5000);
+      }
+
+      function stopPolling() {
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      }
+
+      function connectLive() {
+        const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+        const socket = new WebSocket(`${protocol}://${window.location.host}`);
+
+        socket.addEventListener("open", () => {
+          setStatus("Conectado a streaming en vivo.");
+        });
+
+        socket.addEventListener("message", (event) => {
+          let payload = null;
+          try {
+            payload = JSON.parse(event.data);
+          } catch (_error) {
+            return;
+          }
+
+          if (payload && payload.type === "frame" && payload.dataUrl) {
+            liveActive = true;
+            stopPolling();
+            img.src = payload.dataUrl;
+            setStatus("En vivo: " + new Date().toLocaleTimeString());
+          }
+        });
+
+        socket.addEventListener("close", () => {
+          if (liveActive) {
+            setStatus("Streaming desconectado, usando snapshots.");
+          }
+          startPolling();
+        });
+
+        socket.addEventListener("error", () => {
+          setStatus("Error en streaming, usando snapshots.");
+          startPolling();
+        });
       }
 
       refreshBtn.addEventListener("click", refresh);
-      refresh();
-      setInterval(refresh, 5000);
+      connectLive();
+      startPolling();
     </script>
   </body>
 </html>
