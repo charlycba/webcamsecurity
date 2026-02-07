@@ -19,17 +19,23 @@ body {
 }
 
 .log-panel {
-  margin-top: 12px;
-  width: 100%;
-  background: #111;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: auto;
+  background: rgba(0, 0, 0, 0.6);
   color: #f6f2ea;
-  border-radius: 16px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
-  padding: 12px;
-  max-height: 32vh;
+  border-radius: 14px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  padding: 10px;
+  max-height: 30%;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  backdrop-filter: blur(3px);
+  pointer-events: auto;
+  z-index: 5;
 }
 
 .log-panel__header {
@@ -66,6 +72,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  max-height: 22vh;
 }
 
 .log-row {
@@ -91,15 +98,15 @@ body {
 }
 
 .log-frontend .log-origin {
-  color: #7aa7ff;
-}
-
-.log-server .log-origin {
   color: #7adf9c;
 }
 
+.log-server .log-origin {
+  color: #ffb066;
+}
+
 .log-signal .log-origin {
-  color: #f2c56a;
+  color: #7aa7ff;
 }
 
 .log-warn .log-message {
@@ -107,6 +114,10 @@ body {
 }
 
 .log-error .log-message {
+  color: #ff7a7a;
+}
+
+.log-error .log-origin {
   color: #ff7a7a;
 }
 
@@ -139,6 +150,47 @@ body {
 .viewer {
   margin: 18px 0;
   position: relative;
+}
+
+.metrics-hidden .hud {
+  display: none;
+}
+
+.hud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  color: #eaf7ea;
+  font-family: "SFMono-Regular", "Menlo", "Monaco", "Consolas", "Liberation Mono", "Courier New", monospace;
+  font-size: 0.8rem;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  z-index: 4;
+}
+
+.hud-group {
+  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.hud-title {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(234, 247, 234, 0.7);
+  margin-bottom: 4px;
+}
+
+.hud-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .monitor-frame {

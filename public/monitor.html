@@ -17,6 +17,30 @@
         <div class="monitor-frame" id="monitorFrame">
           <video id="liveVideo" autoplay playsinline muted></video>
         </div>
+        <div class="hud" aria-hidden="true">
+          <div class="hud-group">
+            <div class="hud-title">Red / WebRTC</div>
+            <div class="hud-row"><span>RTT</span><span id="hudRtt">--</span></div>
+            <div class="hud-row"><span>Jitter</span><span id="hudJitter">--</span></div>
+            <div class="hud-row"><span>Packet loss</span><span id="hudLoss">--</span></div>
+            <div class="hud-row"><span>ICE tipo</span><span id="hudIceType">--</span></div>
+            <div class="hud-row"><span>ICE estado</span><span id="hudIceState">--</span></div>
+          </div>
+          <div class="hud-group">
+            <div class="hud-title">Video</div>
+            <div class="hud-row"><span>Resolucion</span><span id="hudResolution">--</span></div>
+            <div class="hud-row"><span>FPS</span><span id="hudFps">--</span></div>
+            <div class="hud-row"><span>Bitrate</span><span id="hudBitrate">--</span></div>
+            <div class="hud-row"><span>Dropped</span><span id="hudDropped">--</span></div>
+          </div>
+          <div class="hud-group">
+            <div class="hud-title">Cliente</div>
+            <div class="hud-row"><span>Browser</span><span id="hudBrowser">--</span></div>
+            <div class="hud-row"><span>OS</span><span id="hudOs">--</span></div>
+            <div class="hud-row"><span>Pestaña</span><span id="hudVisibility">--</span></div>
+            <div class="hud-row"><span>HW accel</span><span id="hudHwAccel">--</span></div>
+          </div>
+        </div>
         <div class="overlay" aria-live="polite">
           <div class="overlay-card">
             <span class="info-label">IP del dispositivo</span>
@@ -35,10 +59,36 @@
             <span class="info-value" id="liveLatency">--</span>
           </div>
         </div>
+        <aside class="log-panel hidden" id="logsPanel" aria-live="polite">
+          <div class="log-panel__header">
+            <h2>Logs en vivo</h2>
+            <div class="log-panel__actions">
+              <label class="log-toggle">
+                <input type="checkbox" id="filterFrontend" checked />
+                Frontend
+              </label>
+              <label class="log-toggle">
+                <input type="checkbox" id="filterServer" checked />
+                Servidor
+              </label>
+              <label class="log-toggle">
+                <input type="checkbox" id="filterSignal" checked />
+                WebRTC
+              </label>
+              <label class="log-toggle">
+                <input type="checkbox" id="pauseScroll" />
+                Pausar auto-scroll
+              </label>
+              <button id="closeLogsBtn" type="button">Cerrar</button>
+            </div>
+          </div>
+          <div id="logsContent" class="log-panel__content" role="log" aria-live="polite"></div>
+        </aside>
       </section>
 
       <section class="controls monitor-controls">
         <button id="fullscreenBtn" type="button">⛶ Pantalla completa</button>
+        <button id="metricsToggleBtn" type="button">Mostrar metrics</button>
         <div class="zoom-control">
           <button id="zoomOutBtn" type="button" aria-label="Reducir zoom">−</button>
           <label for="zoomRange">Zoom</label>
@@ -47,33 +97,7 @@
           <button id="zoomInBtn" type="button" aria-label="Aumentar zoom">+</button>
         </div>
         <button id="resetZoomBtn" type="button">Reset zoom</button>
-        <button id="toggleLogsBtn" type="button">🧾 Ver logs</button>
-      </section>
-
-      <section class="log-panel hidden" id="logsPanel" aria-live="polite">
-        <div class="log-panel__header">
-          <h2>Logs en vivo</h2>
-          <div class="log-panel__actions">
-            <label class="log-toggle">
-              <input type="checkbox" id="filterFrontend" checked />
-              Frontend
-            </label>
-            <label class="log-toggle">
-              <input type="checkbox" id="filterServer" checked />
-              Servidor
-            </label>
-            <label class="log-toggle">
-              <input type="checkbox" id="filterSignal" checked />
-              Signal
-            </label>
-            <label class="log-toggle">
-              <input type="checkbox" id="pauseScroll" />
-              Pausar auto-scroll
-            </label>
-            <button id="closeLogsBtn" type="button">Cerrar</button>
-          </div>
-        </div>
-        <div id="logsContent" class="log-panel__content" role="log" aria-live="polite"></div>
+        <button id="toggleLogsBtn" type="button">Mostrar logs</button>
       </section>
 
       <section class="status" id="status"></section>
@@ -88,6 +112,7 @@
       const liveFps = document.getElementById("liveFps");
       const liveLatency = document.getElementById("liveLatency");
       const fullscreenBtn = document.getElementById("fullscreenBtn");
+      const metricsToggleBtn = document.getElementById("metricsToggleBtn");
       const zoomRange = document.getElementById("zoomRange");
       const zoomValue = document.getElementById("zoomValue");
       const zoomOutBtn = document.getElementById("zoomOutBtn");
@@ -97,6 +122,19 @@
       const logsContent = document.getElementById("logsContent");
       const toggleLogsBtn = document.getElementById("toggleLogsBtn");
       const closeLogsBtn = document.getElementById("closeLogsBtn");
+      const hudRtt = document.getElementById("hudRtt");
+      const hudJitter = document.getElementById("hudJitter");
+      const hudLoss = document.getElementById("hudLoss");
+      const hudIceType = document.getElementById("hudIceType");
+      const hudIceState = document.getElementById("hudIceState");
+      const hudResolution = document.getElementById("hudResolution");
+      const hudFps = document.getElementById("hudFps");
+      const hudBitrate = document.getElementById("hudBitrate");
+      const hudDropped = document.getElementById("hudDropped");
+      const hudBrowser = document.getElementById("hudBrowser");
+      const hudOs = document.getElementById("hudOs");
+      const hudVisibility = document.getElementById("hudVisibility");
+      const hudHwAccel = document.getElementById("hudHwAccel");
       const filterFrontend = document.getElementById("filterFrontend");
       const filterServer = document.getElementById("filterServer");
       const filterSignal = document.getElementById("filterSignal");
@@ -104,6 +142,7 @@
       const logs = [];
       const maxLogs = 400;
       let logsOpen = false;
+      let showMetrics = true;
       let lastFrameAt = 0;
       let smoothedFps = 0;
       let lastMeta = null;
@@ -112,6 +151,9 @@
       let webrtcActive = false;
       let iceInCount = 0;
       let iceOutCount = 0;
+      let statsTimer = null;
+      let prevInbound = null;
+      let prevStatAt = 0;
 
       let panX = 0;
       let panY = 0;
@@ -181,8 +223,10 @@
       }
 
       function addLog({ source, level, message }) {
+        const now = new Date();
+        const ms = String(now.getMilliseconds()).padStart(3, "0");
         const entry = {
-          ts: new Date().toLocaleTimeString(),
+          ts: `${now.toLocaleTimeString()}.${ms}`,
           source,
           level,
           message
@@ -220,7 +264,9 @@
           time.textContent = entry.ts;
           const origin = document.createElement("span");
           origin.className = "log-origin";
-          origin.textContent = entry.source.toUpperCase();
+          origin.textContent = entry.level === "error"
+            ? "ERROR"
+            : entry.source.toUpperCase();
           const msg = document.createElement("span");
           msg.className = "log-message";
           msg.textContent = entry.message;
@@ -237,13 +283,19 @@
       function setLogsOpen(open) {
         logsOpen = open;
         logsPanel.classList.toggle("hidden", !open);
-        toggleLogsBtn.textContent = open ? "Ocultar logs" : "🧾 Ver logs";
+        toggleLogsBtn.textContent = open ? "Ocultar logs" : "Mostrar logs";
         if (open) {
           renderLogs();
           if (!pauseScroll.checked) {
             logsContent.scrollTop = logsContent.scrollHeight;
           }
         }
+      }
+
+      function setMetricsVisible(visible) {
+        showMetrics = visible;
+        document.body.classList.toggle("metrics-hidden", !visible);
+        metricsToggleBtn.textContent = visible ? "Ocultar metrics" : "Mostrar metrics";
       }
 
       function stringifyArg(arg) {
@@ -272,6 +324,113 @@
 
       function logSignal(message) {
         addLog({ source: "signal", level: "info", message });
+      }
+
+      function updateClientInfo() {
+        const ua = navigator.userAgent;
+        let browser = "Desconocido";
+        let version = "";
+        if (ua.includes("Edg/")) {
+          browser = "Edge";
+          version = ua.split("Edg/")[1]?.split(" ")[0] || "";
+        } else if (ua.includes("Chrome/")) {
+          browser = "Chrome";
+          version = ua.split("Chrome/")[1]?.split(" ")[0] || "";
+        } else if (ua.includes("Firefox/")) {
+          browser = "Firefox";
+          version = ua.split("Firefox/")[1]?.split(" ")[0] || "";
+        } else if (ua.includes("Safari/") && ua.includes("Version/")) {
+          browser = "Safari";
+          version = ua.split("Version/")[1]?.split(" ")[0] || "";
+        }
+        const os = navigator.platform || "Desconocido";
+        hudBrowser.textContent = version ? `${browser} ${version}` : browser;
+        hudOs.textContent = os;
+        hudVisibility.textContent = document.visibilityState === "visible" ? "Visible" : "Background";
+
+        let hwAccel = "Desconocido";
+        try {
+          const canvas = document.createElement("canvas");
+          const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+          if (gl) {
+            const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+            const renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "";
+            if (renderer && /swiftshader|llvmpipe/i.test(renderer)) {
+              hwAccel = "false";
+            } else {
+              hwAccel = "true";
+            }
+          }
+        } catch (_error) {
+          hwAccel = "Desconocido";
+        }
+        hudHwAccel.textContent = hwAccel;
+      }
+
+      function updateVisibility() {
+        hudVisibility.textContent = document.visibilityState === "visible" ? "Visible" : "Background";
+      }
+
+      async function updateStatsOverlay() {
+        if (!rtcPeer) {
+          return;
+        }
+        const stats = await rtcPeer.getStats();
+        let selectedPair = null;
+        let inbound = null;
+        stats.forEach((report) => {
+          if (report.type === "candidate-pair" && (report.selected || report.nominated)) {
+            selectedPair = report;
+          }
+          if (report.type === "inbound-rtp" && report.kind === "video") {
+            inbound = report;
+          }
+        });
+
+        if (selectedPair) {
+          const localCandidate = stats.get(selectedPair.localCandidateId);
+          const remoteCandidate = stats.get(selectedPair.remoteCandidateId);
+          const localType = localCandidate ? localCandidate.candidateType : "-";
+          const remoteType = remoteCandidate ? remoteCandidate.candidateType : "-";
+          hudIceType.textContent = `${localType}/${remoteType}`;
+          const rtt = selectedPair.currentRoundTripTime
+            ? Math.round(selectedPair.currentRoundTripTime * 1000)
+            : null;
+          hudRtt.textContent = rtt !== null ? `${rtt} ms` : "--";
+          hudIceState.textContent = rtcPeer.iceConnectionState || "--";
+        }
+
+        if (inbound) {
+          const jitter = inbound.jitter ? Math.round(inbound.jitter * 1000) : null;
+          hudJitter.textContent = jitter !== null ? `${jitter} ms` : "--";
+          const lost = inbound.packetsLost || 0;
+          const received = inbound.packetsReceived || 0;
+          const total = lost + received;
+          const lossPct = total > 0 ? ((lost / total) * 100).toFixed(1) : "0.0";
+          hudLoss.textContent = `${lossPct}%`;
+
+          const now = performance.now();
+          if (prevInbound && prevStatAt) {
+            const deltaMs = now - prevStatAt;
+            const bytes = inbound.bytesReceived - prevInbound.bytesReceived;
+            const kbps = deltaMs > 0 ? (bytes * 8) / deltaMs : 0;
+            hudBitrate.textContent = `${kbps.toFixed(0)} kbps`;
+            const frames = inbound.framesDecoded - prevInbound.framesDecoded;
+            const fps = deltaMs > 0 ? (frames * 1000) / deltaMs : 0;
+            hudFps.textContent = `${fps.toFixed(1)}`;
+          }
+          prevInbound = inbound;
+          prevStatAt = now;
+
+          if (typeof inbound.framesDropped === "number") {
+            hudDropped.textContent = `${inbound.framesDropped}`;
+          }
+          if (typeof inbound.frameWidth === "number" && typeof inbound.frameHeight === "number") {
+            hudResolution.textContent = `${inbound.frameWidth}x${inbound.frameHeight}`;
+          } else if (liveVideo.videoWidth && liveVideo.videoHeight) {
+            hudResolution.textContent = `${liveVideo.videoWidth}x${liveVideo.videoHeight}`;
+          }
+        }
       }
 
       function updateStats(now) {
@@ -317,6 +476,10 @@
 
       function stopWebRtc() {
         webrtcActive = false;
+        if (statsTimer) {
+          clearInterval(statsTimer);
+          statsTimer = null;
+        }
         if (rtcDataChannel) {
           rtcDataChannel.close();
           rtcDataChannel = null;
@@ -387,6 +550,11 @@
           logSignal(`Estado conexion: ${rtcPeer.connectionState}`);
           if (rtcPeer.connectionState === "connected") {
             updateIceInfo();
+            if (!statsTimer) {
+              prevInbound = null;
+              prevStatAt = 0;
+              statsTimer = setInterval(updateStatsOverlay, 1000);
+            }
           }
         };
         rtcPeer.onsignalingstatechange = () => {
@@ -485,6 +653,9 @@
 
       connectLive();
       hookConsole();
+      updateClientInfo();
+      document.addEventListener("visibilitychange", updateVisibility);
+      setMetricsVisible(true);
 
       updateZoomDisplay(Number(zoomRange.value));
       zoomRange.addEventListener("input", () => {
@@ -509,6 +680,9 @@
       });
       closeLogsBtn.addEventListener("click", () => {
         setLogsOpen(false);
+      });
+      metricsToggleBtn.addEventListener("click", () => {
+        setMetricsVisible(!showMetrics);
       });
       filterFrontend.addEventListener("change", renderLogs);
       filterServer.addEventListener("change", renderLogs);
