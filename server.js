@@ -110,6 +110,10 @@ wss.on("connection", (socket) => {
     } else {
       try {
         const payload = JSON.parse(text);
+        if (payload && payload.type && payload.type.startsWith("webrtc-")) {
+          broadcast(JSON.stringify(payload), socket);
+          return;
+        }
         if (payload && payload.type === "frame" && typeof payload.dataUrl === "string") {
           dataUrl = payload.dataUrl;
           meta = {

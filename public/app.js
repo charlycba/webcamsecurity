@@ -4,6 +4,7 @@ const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
 const switchBtn = document.getElementById("switchBtn");
 const qualitySelect = document.getElementById("qualitySelect");
+const webrtcToggle = document.getElementById("webrtcToggle");
 const statusEl = document.getElementById("status");
 
 let stream = null;
@@ -13,23 +14,35 @@ let liveSocket = null;
 let qualityChangeInProgress = false;
 const MAX_BUFFERED_BYTES = 2_000_000;
 const USE_BINARY_FRAMES = true;
+let useWebRtc = false;
+let rtcPeer = null;
+let rtcDataChannel = null;
+let rtcMetaTimer = null;
 
 const QUALITY_PRESETS = {
+  ultra: {
+    label: "Ultra fluida",
+    width: 320,
+    height: 180,
+    frameRate: 15,
+    jpegQuality: 0.5,
+    intervalMs: 60
+  },
   low: {
     label: "Baja",
     width: 480,
     height: 270,
-    frameRate: 12,
+    frameRate: 15,
     jpegQuality: 0.6,
-    intervalMs: 120
+    intervalMs: 90
   },
   medium: {
     label: "Media",
     width: 960,
     height: 540,
-    frameRate: 18,
+    frameRate: 20,
     jpegQuality: 0.75,
-    intervalMs: 100
+    intervalMs: 75
   },
   high: {
     label: "Alta",
@@ -37,11 +50,11 @@ const QUALITY_PRESETS = {
     height: 720,
     frameRate: 24,
     jpegQuality: 0.82,
-    intervalMs: 80
+    intervalMs: 66
   }
 };
 
-const QUALITY_ORDER = ["low", "medium", "high"];
+const QUALITY_ORDER = ["ultra", "low", "medium", "high"];
 let currentQuality = "medium";
 let autoQuality = false;
 let qualityIndex = 1;
@@ -74,6 +87,9 @@ async function startCamera() {
     stopBtn.disabled = false;
     switchBtn.disabled = false;
     startLiveStream();
+    if (useWebRtc) {
+      await startWebRtc();
+    }
     setStatus("Camara activa.");
   } catch (error) {
     console.error(error);
@@ -90,6 +106,7 @@ function stopCamera() {
   startBtn.disabled = false;
   stopBtn.disabled = true;
   switchBtn.disabled = true;
+  stopWebRtc();
   stopLiveStream();
   setStatus("Camara detenida.");
 }
@@ -154,8 +171,31 @@ function openLiveSocket() {
     setStatus("Streaming en vivo activo.");
   });
 
+  liveSocket.addEventListener("message", async (event) => {
+    let payload = null;
+    try {
+      payload = JSON.parse(event.data);
+    } catch (_error) {
+      return;
+    }
+
+    if (payload && payload.type === "webrtc-answer" && rtcPeer) {
+      await rtcPeer.setRemoteDescription(payload.sdp);
+      return;
+    }
+
+    if (payload && payload.type === "webrtc-ice" && rtcPeer && payload.candidate) {
+      try {
+        await rtcPeer.addIceCandidate(payload.candidate);
+      } catch (_error) {
+        return;
+      }
+    }
+  });
+
   liveSocket.addEventListener("close", () => {
     liveSocket = null;
+    stopWebRtc();
   });
 
   liveSocket.addEventListener("error", () => {
@@ -172,6 +212,10 @@ function startLiveStream() {
   const runLoop = async () => {
     if (!stream || !liveSocket || liveSocket.readyState !== WebSocket.OPEN) {
       liveTimer = setTimeout(runLoop, QUALITY_PRESETS[currentQuality].intervalMs);
+      return;
+    }
+    if (useWebRtc) {
+      liveTimer = setTimeout(runLoop, 500);
       return;
     }
     if (liveSocket.bufferedAmount > MAX_BUFFERED_BYTES) {
@@ -239,6 +283,97 @@ function stopLiveStream() {
   if (liveSocket) {
     liveSocket.close();
     liveSocket = null;
+  }
+}
+
+function sendSignal(payload) {
+  if (liveSocket && liveSocket.readyState === WebSocket.OPEN) {
+    liveSocket.send(JSON.stringify(payload));
+  }
+}
+
+function startRtcMetaLoop() {
+  if (rtcMetaTimer) {
+    return;
+  }
+  rtcMetaTimer = setInterval(() => {
+    if (!rtcDataChannel || rtcDataChannel.readyState !== "open") {
+      return;
+    }
+    const preset = QUALITY_PRESETS[currentQuality];
+    const mode = autoQuality ? "Auto" : "Manual";
+    const qualityLabel = preset ? preset.label : "Desconocida";
+    rtcDataChannel.send(JSON.stringify({
+      type: "meta",
+      meta: {
+        quality: qualityLabel,
+        mode,
+        ts: Date.now()
+      }
+    }));
+  }, 1000);
+}
+
+function stopRtcMetaLoop() {
+  if (rtcMetaTimer) {
+    clearInterval(rtcMetaTimer);
+    rtcMetaTimer = null;
+  }
+}
+
+async function startWebRtc() {
+  if (!stream || !useWebRtc) {
+    return;
+  }
+
+  openLiveSocket();
+  if (!liveSocket) {
+    return;
+  }
+
+  if (liveSocket.readyState !== WebSocket.OPEN) {
+    await new Promise((resolve) => {
+      const handler = () => {
+        liveSocket.removeEventListener("open", handler);
+        resolve();
+      };
+      liveSocket.addEventListener("open", handler);
+    });
+  }
+
+  stopWebRtc();
+
+  rtcPeer = new RTCPeerConnection({ iceServers: [] });
+  rtcPeer.onicecandidate = (event) => {
+    if (event.candidate) {
+      sendSignal({ type: "webrtc-ice", candidate: event.candidate });
+    }
+  };
+  rtcPeer.onconnectionstatechange = () => {
+    if (rtcPeer.connectionState === "connected") {
+      setStatus("WebRTC conectado.");
+    }
+  };
+
+  stream.getTracks().forEach((track) => rtcPeer.addTrack(track, stream));
+  rtcDataChannel = rtcPeer.createDataChannel("meta", { ordered: false, maxRetransmits: 0 });
+  rtcDataChannel.addEventListener("open", startRtcMetaLoop);
+  rtcDataChannel.addEventListener("close", stopRtcMetaLoop);
+
+  const offer = await rtcPeer.createOffer({ offerToReceiveVideo: false, offerToReceiveAudio: false });
+  await rtcPeer.setLocalDescription(offer);
+  sendSignal({ type: "webrtc-offer", sdp: rtcPeer.localDescription });
+}
+
+function stopWebRtc() {
+  stopRtcMetaLoop();
+  if (rtcDataChannel) {
+    rtcDataChannel.close();
+    rtcDataChannel = null;
+  }
+  if (rtcPeer) {
+    rtcPeer.close();
+    rtcPeer = null;
   }
 }
 
@@ -317,6 +452,17 @@ qualitySelect.addEventListener("change", async (event) => {
     return;
   }
   await applyStreamQuality(value);
+});
+
+webrtcToggle.addEventListener("change", async (event) => {
+  useWebRtc = event.target.checked;
+  if (useWebRtc) {
+    await startWebRtc();
+    setStatus("Modo WebRTC activo.");
+    return;
+  }
+  stopWebRtc();
+  setStatus("Modo WebRTC desactivado.");
 });
 
 setInterval(autoTuneQuality, 3000);

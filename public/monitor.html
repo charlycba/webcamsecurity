@@ -14,6 +14,7 @@
       </header>
 
       <section class="viewer">
+        <video id="liveVideo" autoplay playsinline muted class="hidden"></video>
         <img id="latest" alt="Ultimo snapshot" />
         <div class="overlay" aria-live="polite">
           <div class="overlay-card">
@@ -50,6 +51,7 @@
 
     <script>
       const img = document.getElementById("latest");
+      const liveVideo = document.getElementById("liveVideo");
       const status = document.getElementById("status");
       const refreshBtn = document.getElementById("refreshBtn");
       const deviceIp = document.getElementById("deviceIp");
@@ -67,6 +69,9 @@
       let lastFrameAt = 0;
       let smoothedFps = 0;
       let lastMeta = null;
+      let rtcPeer = null;
+      let rtcDataChannel = null;
+      let webrtcActive = false;
 
       const params = new URLSearchParams(window.location.search);
       const showLogs = params.get("logs") === "1";
@@ -118,6 +123,98 @@
         }
       }
 
+      function showVideo() {
+        liveVideo.classList.remove("hidden");
+        img.classList.add("hidden");
+      }
+
+      function showImage() {
+        liveVideo.classList.add("hidden");
+        img.classList.remove("hidden");
+      }
+
+      function resetStats() {
+        lastFrameAt = 0;
+        smoothedFps = 0;
+        liveFps.textContent = "--";
+        liveLatency.textContent = "--";
+      }
+
+      function startVideoFpsLoop() {
+        if (typeof liveVideo.requestVideoFrameCallback !== "function") {
+          return;
+        }
+
+        const onFrame = (now) => {
+          if (!webrtcActive) {
+            return;
+          }
+          updateStats(Date.now());
+          liveVideo.requestVideoFrameCallback(onFrame);
+        };
+
+        liveVideo.requestVideoFrameCallback(onFrame);
+      }
+
+      function stopWebRtc() {
+        webrtcActive = false;
+        if (rtcDataChannel) {
+          rtcDataChannel.close();
+          rtcDataChannel = null;
+        }
+        if (rtcPeer) {
+          rtcPeer.close();
+          rtcPeer = null;
+        }
+        liveVideo.srcObject = null;
+        resetStats();
+      }
+
+      async function handleOffer(socket, sdp) {
+        stopWebRtc();
+        rtcPeer = new RTCPeerConnection({ iceServers: [] });
+        rtcPeer.onicecandidate = (event) => {
+          if (event.candidate) {
+            socket.send(JSON.stringify({ type: "webrtc-ice", candidate: event.candidate }));
+          }
+        };
+        rtcPeer.onconnectionstatechange = () => {
+          if (rtcPeer.connectionState === "connected") {
+            setStatus("WebRTC conectado.");
+          }
+        };
+        rtcPeer.ontrack = (event) => {
+          webrtcActive = true;
+          stopPolling();
+          liveVideo.srcObject = event.streams[0];
+          showVideo();
+          startVideoFpsLoop();
+        };
+        rtcPeer.ondatachannel = (event) => {
+          rtcDataChannel = event.channel;
+          rtcDataChannel.addEventListener("message", (msgEvent) => {
+            let payload = null;
+            try {
+              payload = JSON.parse(msgEvent.data);
+            } catch (_error) {
+              return;
+            }
+            if (payload && payload.type === "meta" && payload.meta) {
+              lastMeta = payload.meta;
+              deviceQuality.textContent = payload.meta.quality
+                ? `${payload.meta.quality}${payload.meta.mode ? " (" + payload.meta.mode + ")" : ""}`
+                : "Desconocida";
+              updateStats(Date.now());
+            }
+          });
+        };
+
+        await rtcPeer.setRemoteDescription(sdp);
+        const answer = await rtcPeer.createAnswer();
+        await rtcPeer.setLocalDescription(answer);
+        socket.send(JSON.stringify({ type: "webrtc-answer", sdp: rtcPeer.localDescription }));
+      }
+
       function refresh() {
         const ts = Date.now();
         img.src = `/snapshots/latest.jpg?ts=${ts}`;
@@ -152,6 +249,9 @@
 
         socket.addEventListener("message", (event) => {
           if (event.data instanceof Blob) {
+            if (webrtcActive) {
+              return;
+            }
             liveActive = true;
             stopPolling();
             if (lastObjectUrl) {
@@ -159,6 +259,7 @@
             }
             lastObjectUrl = URL.createObjectURL(event.data);
             img.src = lastObjectUrl;
+            showImage();
             updateStats(Date.now());
             setStatus("En vivo: " + new Date().toLocaleTimeString());
             const now = Date.now();
@@ -176,6 +277,16 @@
             return;
           }
 
+          if (payload && payload.type === "webrtc-offer" && payload.sdp) {
+            handleOffer(socket, payload.sdp);
+            return;
+          }
+
+          if (payload && payload.type === "webrtc-ice" && rtcPeer && payload.candidate) {
+            rtcPeer.addIceCandidate(payload.candidate);
+            return;
+          }
+
           if (payload && payload.type === "meta" && payload.meta) {
             lastMeta = payload.meta;
             deviceIp.textContent = payload.meta.ip || "Desconocida";
@@ -186,9 +297,13 @@
           }
 
           if (payload && payload.type === "frame" && payload.dataUrl) {
+            if (webrtcActive) {
+              return;
+            }
             liveActive = true;
             stopPolling();
             img.src = payload.dataUrl;
+            showImage();
             updateStats(Date.now());
             if (payload.meta) {
               lastMeta = payload.meta;
@@ -211,12 +326,16 @@
             setStatus("Streaming desconectado, usando snapshots.");
           }
           addLog("Streaming desconectado.");
+          stopWebRtc();
+          showImage();
           startPolling();
         });
 
         socket.addEventListener("error", () => {
           setStatus("Error en streaming, usando snapshots.");
           addLog("Error en streaming.");
+          stopWebRtc();
+          showImage();
           startPolling();
         });
       }
