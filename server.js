@@ -15,6 +15,7 @@ if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
 }
 
 app.use(express.static(path.join(__dirname, "public")));
+app.use("/vendor", express.static(path.join(__dirname, "node_modules", "qrcodejs")));
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });

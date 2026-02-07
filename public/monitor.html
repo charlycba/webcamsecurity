@@ -10,7 +10,19 @@
     <main class="app">
       <header class="header">
         <h1>Monitor</h1>
-        <p>Video en vivo en tiempo real.</p>
+        <div class="header-connect" aria-live="polite">
+          <div class="header-qr" id="clientQr" aria-hidden="true"></div>
+          <div class="header-link">
+            <span class="header-link__label">Link cliente</span>
+            <div class="header-link__row">
+              <a id="clientLink" class="header-link__url" href="#" target="_blank" rel="noopener noreferrer"></a>
+              <button id="copyLinkBtn" class="copy-btn" type="button" aria-label="Copiar link" title="Copiar link">
+                <span class="copy-btn__icon" aria-hidden="true">📋</span>
+              </button>
+              <span id="copyFeedback" class="copy-feedback" role="status" aria-live="polite">Copiar link</span>
+            </div>
+          </div>
+        </div>
       </header>
 
       <section class="viewer">
@@ -104,6 +116,7 @@
       <section class="status" id="status"></section>
     </main>
 
+    <script src="/vendor/qrcode.min.js"></script>
     <script>
       const liveVideo = document.getElementById("liveVideo");
       const monitorFrame = document.getElementById("monitorFrame");
@@ -112,6 +125,10 @@
       const deviceQuality = document.getElementById("deviceQuality");
       const liveFps = document.getElementById("liveFps");
       const liveLatency = document.getElementById("liveLatency");
+      const clientQr = document.getElementById("clientQr");
+      const clientLink = document.getElementById("clientLink");
+      const copyLinkBtn = document.getElementById("copyLinkBtn");
+      const copyFeedback = document.getElementById("copyFeedback");
       const fullscreenBtn = document.getElementById("fullscreenBtn");
       const metricsToggleBtn = document.getElementById("metricsToggleBtn");
       const zoomRange = document.getElementById("zoomRange");
@@ -155,6 +172,7 @@
       let statsTimer = null;
       let prevInbound = null;
       let prevStatAt = 0;
+      const clientUrl = `${location.protocol}//${location.hostname}${location.port ? ":" + location.port : ""}/`;
 
       let panX = 0;
       let panY = 0;
@@ -221,6 +239,31 @@
 
       function setStatus(message) {
         status.textContent = message;
+      }
+
+      function updateClientLink() {
+        clientLink.textContent = clientUrl;
+        clientLink.href = clientUrl;
+      }
+
+      function renderClientQr() {
+        if (!clientQr || typeof QRCode === "undefined") {
+          return;
+        }
+        clientQr.textContent = "";
+        new QRCode(clientQr, {
+          text: clientUrl,
+          width: 140,
+          height: 140,
+          colorDark: "#0b0b0b",
+          colorLight: "#fff6e9",
+          correctLevel: QRCode.CorrectLevel.M
+        });
+      }
+
+      function setCopyFeedback(message, active) {
+        copyFeedback.textContent = message;
+        copyFeedback.classList.toggle("is-active", active);
       }
 
       function addLog({ source, level, message }) {
@@ -677,6 +720,8 @@
       connectLive();
       hookConsole();
       updateClientInfo();
+      updateClientLink();
+      renderClientQr();
       document.addEventListener("visibilitychange", updateVisibility);
       setMetricsVisible(false);
 
@@ -716,6 +761,18 @@
         }
       });
       fullscreenBtn.addEventListener("click", toggleFullscreen);
+      copyLinkBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(clientUrl);
+          setCopyFeedback("Link copiado ✔", true);
+        } catch (_error) {
+          setCopyFeedback("No se pudo copiar", true);
+        }
+        window.clearTimeout(copyLinkBtn._feedbackTimer);
+        copyLinkBtn._feedbackTimer = window.setTimeout(() => {
+          setCopyFeedback("Copiar link", false);
+        }, 1600);
+      });
       monitorFrame.addEventListener("dblclick", () => {
         if (Number(zoomRange.value) > 1) {
           centerPan();
