@@ -1,67 +1,41 @@
 const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
 const switchBtn = document.getElementById("switchBtn");
 const qualitySelect = document.getElementById("qualitySelect");
-const webrtcToggle = document.getElementById("webrtcToggle");
 const statusEl = document.getElementById("status");
 
 let stream = null;
 let usingFront = false;
-let liveTimer = null;
-let liveSocket = null;
-let qualityChangeInProgress = false;
-const MAX_BUFFERED_BYTES = 2_000_000;
-const USE_BINARY_FRAMES = true;
-let useWebRtc = false;
+let signalSocket = null;
 let rtcPeer = null;
+let rtcSender = null;
 let rtcDataChannel = null;
 let rtcMetaTimer = null;
+let currentQuality = "medium";
 
 const QUALITY_PRESETS = {
-  ultra: {
-    label: "Ultra fluida",
-    width: 320,
-    height: 180,
-    frameRate: 15,
-    jpegQuality: 0.5,
-    intervalMs: 60
-  },
   low: {
     label: "Baja",
-    width: 480,
-    height: 270,
-    frameRate: 15,
-    jpegQuality: 0.6,
-    intervalMs: 90
+    width: 640,
+    height: 360,
+    frameRate: 60,
+    maxBitrate: 1_500_000
   },
   medium: {
     label: "Media",
-    width: 960,
-    height: 540,
-    frameRate: 20,
-    jpegQuality: 0.75,
-    intervalMs: 75
+    width: 1280,
+    height: 720,
+    frameRate: 60,
+    maxBitrate: 3_500_000
   },
   high: {
     label: "Alta",
-    width: 1280,
-    height: 720,
-    frameRate: 24,
-    jpegQuality: 0.82,
-    intervalMs: 66
+    width: 1920,
+    height: 1080,
+    frameRate: 30,
+    maxBitrate: 6_000_000
   }
-};
-
-const QUALITY_ORDER = ["ultra", "low", "medium", "high"];
-let currentQuality = "medium";
-let autoQuality = false;
-let qualityIndex = 1;
-let autoMetrics = {
-  encodeMs: 0,
-  sendDelayMs: 0,
-  lastFrameAt: 0
 };
 
 function setStatus(message) {
@@ -86,10 +60,7 @@ async function startCamera() {
     startBtn.disabled = true;
     stopBtn.disabled = false;
     switchBtn.disabled = false;
-    startLiveStream();
-    if (useWebRtc) {
-      await startWebRtc();
-    }
+    await startWebRtc();
     setStatus("Camara activa.");
   } catch (error) {
     console.error(error);
@@ -107,7 +78,10 @@ function stopCamera() {
   stopBtn.disabled = true;
   switchBtn.disabled = true;
   stopWebRtc();
-  stopLiveStream();
+  if (signalSocket) {
+    signalSocket.close();
+    signalSocket = null;
+  }
   setStatus("Camara detenida.");
 }
 
@@ -117,61 +91,14 @@ async function switchCamera() {
   await startCamera();
 }
 
-function captureDataUrl() {
-  if (!stream) {
-    return null;
-  }
-  const track = stream.getVideoTracks()[0];
-  const settings = track.getSettings();
-  const preset = QUALITY_PRESETS[currentQuality];
-  const width = settings.width || preset.width;
-  const height = settings.height || preset.height;
-
-  const targetWidth = Math.min(width, preset.width);
-  const targetHeight = Math.round(height * (targetWidth / width));
-
-  canvas.width = targetWidth;
-  canvas.height = targetHeight;
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
-  return canvas.toDataURL("image/jpeg", preset.jpegQuality);
-}
-
-function captureBlob() {
-  if (!stream) {
-    return null;
-  }
-  const track = stream.getVideoTracks()[0];
-  const settings = track.getSettings();
-  const preset = QUALITY_PRESETS[currentQuality];
-  const width = settings.width || preset.width;
-  const height = settings.height || preset.height;
-
-  const targetWidth = Math.min(width, preset.width);
-  const targetHeight = Math.round(height * (targetWidth / width));
-
-  canvas.width = targetWidth;
-  canvas.height = targetHeight;
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
-
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => resolve(blob), "image/jpeg", preset.jpegQuality);
-  });
-}
-
-function openLiveSocket() {
-  if (liveSocket) {
+function openSignalSocket() {
+  if (signalSocket) {
     return;
   }
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  liveSocket = new WebSocket(`${protocol}://${window.location.host}`);
+  signalSocket = new WebSocket(`${protocol}://${window.location.host}`);
 
-  liveSocket.addEventListener("open", () => {
-    setStatus("Streaming en vivo activo.");
-  });
-
-  liveSocket.addEventListener("message", async (event) => {
+  signalSocket.addEventListener("message", async (event) => {
     let payload = null;
     try {
       payload = JSON.parse(event.data);
@@ -193,102 +120,19 @@ function openLiveSocket() {
     }
   });
 
-  liveSocket.addEventListener("close", () => {
-    liveSocket = null;
+  signalSocket.addEventListener("close", () => {
+    signalSocket = null;
     stopWebRtc();
   });
 
-  liveSocket.addEventListener("error", () => {
-    setStatus("Error en streaming en vivo.");
+  signalSocket.addEventListener("error", () => {
+    setStatus("Error en signaling.");
   });
 }
 
-function startLiveStream() {
-  if (liveTimer) {
-    return;
-  }
-
-  openLiveSocket();
-  const runLoop = async () => {
-    if (!stream || !liveSocket || liveSocket.readyState !== WebSocket.OPEN) {
-      liveTimer = setTimeout(runLoop, QUALITY_PRESETS[currentQuality].intervalMs);
-      return;
-    }
-    if (useWebRtc) {
-      liveTimer = setTimeout(runLoop, 500);
-      return;
-    }
-    if (liveSocket.bufferedAmount > MAX_BUFFERED_BYTES) {
-      liveTimer = setTimeout(runLoop, QUALITY_PRESETS[currentQuality].intervalMs);
-      return;
-    }
-    if (video.readyState < 2) {
-      liveTimer = setTimeout(runLoop, QUALITY_PRESETS[currentQuality].intervalMs);
-      return;
-    }
-    const startedAt = performance.now();
-    const dataUrl = USE_BINARY_FRAMES ? null : captureDataUrl();
-    const blob = USE_BINARY_FRAMES ? await captureBlob() : null;
-    const encodedAt = performance.now();
-    autoMetrics.encodeMs = encodedAt - startedAt;
-    if (dataUrl || blob) {
-      if (liveSocket.bufferedAmount <= MAX_BUFFERED_BYTES) {
-        const sinceLast = autoMetrics.lastFrameAt ? (startedAt - autoMetrics.lastFrameAt) : 0;
-        autoMetrics.lastFrameAt = startedAt;
-        autoMetrics.sendDelayMs = sinceLast;
-        const preset = QUALITY_PRESETS[currentQuality];
-        const mode = autoQuality ? "Auto" : "Manual";
-        const qualityLabel = preset ? preset.label : "Desconocida";
-        liveSocket.send(JSON.stringify({
-          type: "meta",
-          meta: {
-            quality: qualityLabel,
-            mode,
-            ts: Date.now()
-          }
-        }));
-        if (blob) {
-          liveSocket.send(blob);
-        } else if (dataUrl) {
-          liveSocket.send(JSON.stringify({
-            type: "frame",
-            dataUrl,
-            quality: qualityLabel,
-            mode
-          }));
-        }
-      }
-    }
-    liveTimer = setTimeout(runLoop, QUALITY_PRESETS[currentQuality].intervalMs);
-  };
-
-  runLoop();
-}
-
-function restartLiveInterval() {
-  if (liveTimer) {
-    clearTimeout(liveTimer);
-    liveTimer = null;
-  }
-  if (stream) {
-    startLiveStream();
-  }
-}
-
-function stopLiveStream() {
-  if (liveTimer) {
-    clearTimeout(liveTimer);
-    liveTimer = null;
-  }
-  if (liveSocket) {
-    liveSocket.close();
-    liveSocket = null;
-  }
-}
-
 function sendSignal(payload) {
-  if (liveSocket && liveSocket.readyState === WebSocket.OPEN) {
-    liveSocket.send(JSON.stringify(payload));
+  if (signalSocket && signalSocket.readyState === WebSocket.OPEN) {
+    signalSocket.send(JSON.stringify(payload));
   }
 }
 
@@ -301,13 +145,10 @@ function startRtcMetaLoop() {
       return;
     }
     const preset = QUALITY_PRESETS[currentQuality];
-    const mode = autoQuality ? "Auto" : "Manual";
-    const qualityLabel = preset ? preset.label : "Desconocida";
     rtcDataChannel.send(JSON.stringify({
       type: "meta",
       meta: {
-        quality: qualityLabel,
-        mode,
+        quality: preset ? preset.label : "Desconocida",
         ts: Date.now()
       }
     }));
@@ -321,41 +162,103 @@ function stopRtcMetaLoop() {
   }
 }
 
+async function applySenderParameters() {
+  if (!rtcSender) {
+    return;
+  }
+  const preset = QUALITY_PRESETS[currentQuality];
+  const params = rtcSender.getParameters();
+  if (!params.encodings || params.encodings.length === 0) {
+    params.encodings = [{}];
+  }
+  params.encodings[0].maxBitrate = preset.maxBitrate;
+  params.encodings[0].maxFramerate = preset.frameRate;
+  params.encodings[0].priority = "high";
+  params.degradationPreference = "maintain-framerate";
+
+  try {
+    await rtcSender.setParameters(params);
+  } catch (error) {
+    console.warn("No se pudo aplicar parametros de WebRTC.", error);
+  }
+}
+
+async function updateIceInfo() {
+  if (!rtcPeer) {
+    return;
+  }
+  const stats = await rtcPeer.getStats();
+  let selectedPair = null;
+  stats.forEach((report) => {
+    if (report.type === "candidate-pair" && (report.selected || report.nominated)) {
+      selectedPair = report;
+    }
+  });
+
+  if (!selectedPair) {
+    return;
+  }
+
+  const localCandidate = stats.get(selectedPair.localCandidateId);
+  const remoteCandidate = stats.get(selectedPair.remoteCandidateId);
+  const localType = localCandidate ? localCandidate.candidateType : "desconocido";
+  const remoteType = remoteCandidate ? remoteCandidate.candidateType : "desconocido";
+
+  if (localType === "relay" || remoteType === "relay") {
+    setStatus("WebRTC conectado. ICE relay detectado.");
+    return;
+  }
+
+  setStatus(`WebRTC conectado. ICE ${localType}/${remoteType}.`);
+}
+
 async function startWebRtc() {
-  if (!stream || !useWebRtc) {
+  if (!stream) {
     return;
   }
 
-  openLiveSocket();
-  if (!liveSocket) {
+  openSignalSocket();
+  if (!signalSocket) {
     return;
   }
 
-  if (liveSocket.readyState !== WebSocket.OPEN) {
+  if (signalSocket.readyState !== WebSocket.OPEN) {
     await new Promise((resolve) => {
       const handler = () => {
-        liveSocket.removeEventListener("open", handler);
+        signalSocket.removeEventListener("open", handler);
         resolve();
       };
-      liveSocket.addEventListener("open", handler);
+      signalSocket.addEventListener("open", handler);
     });
   }
 
   stopWebRtc();
 
-  rtcPeer = new RTCPeerConnection({ iceServers: [] });
+  rtcPeer = new RTCPeerConnection({
+    iceServers: [],
+    bundlePolicy: "max-bundle",
+    rtcpMuxPolicy: "require"
+  });
+
   rtcPeer.onicecandidate = (event) => {
     if (event.candidate) {
       sendSignal({ type: "webrtc-ice", candidate: event.candidate });
     }
   };
+
   rtcPeer.onconnectionstatechange = () => {
     if (rtcPeer.connectionState === "connected") {
-      setStatus("WebRTC conectado.");
+      updateIceInfo();
     }
   };
 
-  stream.getTracks().forEach((track) => rtcPeer.addTrack(track, stream));
+  const track = stream.getVideoTracks()[0];
+  if (track) {
+    track.contentHint = "motion";
+    rtcSender = rtcPeer.addTrack(track, stream);
+    await applySenderParameters();
+  }
+
   rtcDataChannel = rtcPeer.createDataChannel("meta", { ordered: false, maxRetransmits: 0 });
   rtcDataChannel.addEventListener("open", startRtcMetaLoop);
   rtcDataChannel.addEventListener("close", stopRtcMetaLoop);
@@ -375,25 +278,15 @@ function stopWebRtc() {
     rtcPeer.close();
     rtcPeer = null;
   }
-}
-
-function applyQuality(key) {
-  currentQuality = key;
-  qualityIndex = QUALITY_ORDER.indexOf(key);
+  rtcSender = null;
 }
 
 async function applyStreamQuality(key) {
-  if (qualityChangeInProgress) {
-    return;
-  }
-
   const preset = QUALITY_PRESETS[key];
   if (!preset) {
     return;
   }
-
-  qualityChangeInProgress = true;
-  applyQuality(key);
+  currentQuality = key;
 
   if (stream) {
     const track = stream.getVideoTracks()[0];
@@ -410,34 +303,8 @@ async function applyStreamQuality(key) {
     }
   }
 
-  restartLiveInterval();
-  setStatus(`Calidad ${preset.label}${autoQuality ? " (Auto)" : ""}.`);
-  qualityChangeInProgress = false;
-}
-
-function autoTuneQuality() {
-  if (!autoQuality || !stream) {
-    return;
-  }
-
-  const preset = QUALITY_PRESETS[currentQuality];
-  const interval = preset.intervalMs;
-  const encodeBudget = interval * 0.65;
-  const bufferPressure = liveSocket ? liveSocket.bufferedAmount : 0;
-
-  const shouldDecrease = autoMetrics.encodeMs > encodeBudget || bufferPressure > 5_000_000;
-  const shouldIncrease = autoMetrics.encodeMs < encodeBudget * 0.55 && bufferPressure < 1_000_000;
-
-  if (shouldDecrease && qualityIndex > 0) {
-    qualityIndex -= 1;
-    applyStreamQuality(QUALITY_ORDER[qualityIndex]);
-    return;
-  }
-
-  if (shouldIncrease && qualityIndex < QUALITY_ORDER.length - 1) {
-    qualityIndex += 1;
-    applyStreamQuality(QUALITY_ORDER[qualityIndex]);
-  }
+  await applySenderParameters();
+  setStatus(`Calidad ${preset.label}.`);
 }
 
 startBtn.addEventListener("click", startCamera);
@@ -445,27 +312,8 @@ stopBtn.addEventListener("click", stopCamera);
 switchBtn.addEventListener("click", switchCamera);
 
 qualitySelect.addEventListener("change", async (event) => {
-  const value = event.target.value;
-  autoQuality = value === "auto";
-  if (autoQuality) {
-    await applyStreamQuality(QUALITY_ORDER[qualityIndex]);
-    return;
-  }
-  await applyStreamQuality(value);
+  await applyStreamQuality(event.target.value);
 });
-
-webrtcToggle.addEventListener("change", async (event) => {
-  useWebRtc = event.target.checked;
-  if (useWebRtc) {
-    await startWebRtc();
-    setStatus("Modo WebRTC activo.");
-    return;
-  }
-  stopWebRtc();
-  setStatus("Modo WebRTC desactivado.");
-});
-
-setInterval(autoTuneQuality, 3000);
 
 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
   setStatus("Este navegador no soporta getUserMedia.");

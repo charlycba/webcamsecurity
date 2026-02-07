@@ -15,7 +15,6 @@
 
       <section class="viewer">
         <video id="video" autoplay playsinline muted></video>
-        <canvas id="canvas" class="hidden"></canvas>
       </section>
 
       <section class="controls">
@@ -28,16 +27,10 @@
         <label class="select">
           Calidad
           <select id="qualitySelect">
-            <option value="auto">Auto</option>
-            <option value="ultra">Ultra fluida</option>
             <option value="low">Baja</option>
             <option value="medium" selected>Media</option>
             <option value="high">Alta</option>
           </select>
-        </label>
-        <label class="select">
-          <input type="checkbox" id="webrtcToggle" />
-          Modo WebRTC (LAN)
         </label>
       </section>
 

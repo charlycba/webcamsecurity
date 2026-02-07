@@ -10,12 +10,11 @@
     <main class="app">
       <header class="header">
         <h1>Monitor</h1>
-        <p>Ultimo snapshot recibido.</p>
+        <p>Video en vivo en tiempo real.</p>
       </header>
 
       <section class="viewer">
-        <video id="liveVideo" autoplay playsinline muted class="hidden"></video>
-        <img id="latest" alt="Ultimo snapshot" />
+        <video id="liveVideo" autoplay playsinline muted></video>
         <div class="overlay" aria-live="polite">
           <div class="overlay-card">
             <span class="info-label">IP del dispositivo</span>
@@ -37,7 +36,6 @@
       </section>
 
       <section class="controls">
-        <button id="refreshBtn">Refrescar</button>
         <a id="openLogs" href="/monitor.html?logs=1" target="_blank" rel="noopener">Ver logs</a>
       </section>
 
@@ -50,10 +48,8 @@
     </main>
 
     <script>
-      const img = document.getElementById("latest");
       const liveVideo = document.getElementById("liveVideo");
       const status = document.getElementById("status");
-      const refreshBtn = document.getElementById("refreshBtn");
       const deviceIp = document.getElementById("deviceIp");
       const deviceQuality = document.getElementById("deviceQuality");
       const liveFps = document.getElementById("liveFps");
@@ -61,11 +57,7 @@
       const logsSection = document.getElementById("logsSection");
       const logsContent = document.getElementById("logsContent");
       const logs = [];
-      let pollTimer = null;
-      let liveActive = false;
-      let lastFrameLog = 0;
       let lastStoredSize = 0;
-      let lastObjectUrl = null;
       let lastFrameAt = 0;
       let smoothedFps = 0;
       let lastMeta = null;
@@ -123,16 +115,6 @@
         }
       }
 
-      function showVideo() {
-        liveVideo.classList.remove("hidden");
-        img.classList.add("hidden");
-      }
-
-      function showImage() {
-        liveVideo.classList.add("hidden");
-        img.classList.remove("hidden");
-      }
-
       function resetStats() {
         lastFrameAt = 0;
         smoothedFps = 0;
@@ -145,7 +127,7 @@
           return;
         }
 
-        const onFrame = (now) => {
+        const onFrame = () => {
           if (!webrtcActive) {
             return;
           }
@@ -170,9 +152,42 @@
         resetStats();
       }
 
+      async function updateIceInfo() {
+        if (!rtcPeer) {
+          return;
+        }
+        const stats = await rtcPeer.getStats();
+        let selectedPair = null;
+        stats.forEach((report) => {
+          if (report.type === "candidate-pair" && (report.selected || report.nominated)) {
+            selectedPair = report;
+          }
+        });
+
+        if (!selectedPair) {
+          return;
+        }
+
+        const localCandidate = stats.get(selectedPair.localCandidateId);
+        const remoteCandidate = stats.get(selectedPair.remoteCandidateId);
+        const localType = localCandidate ? localCandidate.candidateType : "desconocido";
+        const remoteType = remoteCandidate ? remoteCandidate.candidateType : "desconocido";
+
+        if (localType === "relay" || remoteType === "relay") {
+          setStatus("WebRTC conectado. ICE relay detectado.");
+          return;
+        }
+
+        setStatus(`WebRTC conectado. ICE ${localType}/${remoteType}.`);
+      }
+
       async function handleOffer(socket, sdp) {
         stopWebRtc();
-        rtcPeer = new RTCPeerConnection({ iceServers: [] });
+        rtcPeer = new RTCPeerConnection({
+          iceServers: [],
+          bundlePolicy: "max-bundle",
+          rtcpMuxPolicy: "require"
+        });
         rtcPeer.onicecandidate = (event) => {
           if (event.candidate) {
             socket.send(JSON.stringify({ type: "webrtc-ice", candidate: event.candidate }));
@@ -180,14 +195,12 @@
         };
         rtcPeer.onconnectionstatechange = () => {
           if (rtcPeer.connectionState === "connected") {
-            setStatus("WebRTC conectado.");
+            updateIceInfo();
           }
         };
         rtcPeer.ontrack = (event) => {
           webrtcActive = true;
-          stopPolling();
           liveVideo.srcObject = event.streams[0];
-          showVideo();
           startVideoFpsLoop();
         };
         rtcPeer.ondatachannel = (event) => {
@@ -215,61 +228,16 @@
         socket.send(JSON.stringify({ type: "webrtc-answer", sdp: rtcPeer.localDescription }));
       }
 
-      function refresh() {
-        const ts = Date.now();
-        img.src = `/snapshots/latest.jpg?ts=${ts}`;
-        setStatus("Snapshot: " + new Date().toLocaleTimeString());
-        addLog("Snapshot refrescado.");
-      }
-
-      function startPolling() {
-        if (pollTimer) {
-          return;
-        }
-        refresh();
-        pollTimer = setInterval(refresh, 5000);
-        addLog("Fallback a snapshots cada 5s.");
-      }
-
-      function stopPolling() {
-        if (pollTimer) {
-          clearInterval(pollTimer);
-          pollTimer = null;
-        }
-      }
-
       function connectLive() {
         const protocol = window.location.protocol === "https:" ? "wss" : "ws";
         const socket = new WebSocket(`${protocol}://${window.location.host}`);
 
         socket.addEventListener("open", () => {
-          setStatus("Conectado a streaming en vivo.");
-          addLog("Conectado a streaming en vivo.");
+          setStatus("Conectado a signaling.");
+          addLog("Conectado a signaling.");
         });
 
         socket.addEventListener("message", (event) => {
-          if (event.data instanceof Blob) {
-            if (webrtcActive) {
-              return;
-            }
-            liveActive = true;
-            stopPolling();
-            if (lastObjectUrl) {
-              URL.revokeObjectURL(lastObjectUrl);
-            }
-            lastObjectUrl = URL.createObjectURL(event.data);
-            img.src = lastObjectUrl;
-            showImage();
-            updateStats(Date.now());
-            setStatus("En vivo: " + new Date().toLocaleTimeString());
-            const now = Date.now();
-            if (now - lastFrameLog > 2000) {
-              addLog("Frame en vivo recibido.");
-              lastFrameLog = now;
-            }
-            return;
-          }
-
           let payload = null;
           try {
             payload = JSON.parse(event.data);
@@ -286,63 +254,22 @@
             rtcPeer.addIceCandidate(payload.candidate);
             return;
           }
-
-          if (payload && payload.type === "meta" && payload.meta) {
-            lastMeta = payload.meta;
-            deviceIp.textContent = payload.meta.ip || "Desconocida";
-            deviceQuality.textContent = payload.meta.quality
-              ? `${payload.meta.quality}${payload.meta.mode ? " (" + payload.meta.mode + ")" : ""}`
-              : "Desconocida";
-            return;
-          }
-
-          if (payload && payload.type === "frame" && payload.dataUrl) {
-            if (webrtcActive) {
-              return;
-            }
-            liveActive = true;
-            stopPolling();
-            img.src = payload.dataUrl;
-            showImage();
-            updateStats(Date.now());
-            if (payload.meta) {
-              lastMeta = payload.meta;
-              deviceIp.textContent = payload.meta.ip || "Desconocida";
-              deviceQuality.textContent = payload.meta.quality
-                ? `${payload.meta.quality}${payload.meta.mode ? " (" + payload.meta.mode + ")" : ""}`
-                : "Desconocida";
-            }
-            setStatus("En vivo: " + new Date().toLocaleTimeString());
-            const now = Date.now();
-            if (now - lastFrameLog > 2000) {
-              addLog("Frame en vivo recibido.");
-              lastFrameLog = now;
-            }
-          }
         });
 
         socket.addEventListener("close", () => {
-          if (liveActive) {
-            setStatus("Streaming desconectado, usando snapshots.");
-          }
-          addLog("Streaming desconectado.");
+          setStatus("Signaling desconectado.");
+          addLog("Signaling desconectado.");
           stopWebRtc();
-          showImage();
-          startPolling();
         });
 
         socket.addEventListener("error", () => {
-          setStatus("Error en streaming, usando snapshots.");
-          addLog("Error en streaming.");
+          setStatus("Error en signaling.");
+          addLog("Error en signaling.");
           stopWebRtc();
-          showImage();
-          startPolling();
         });
       }
 
-      refreshBtn.addEventListener("click", refresh);
       connectLive();
-      startPolling();
 
       if (showLogs) {
         setInterval(() => {
