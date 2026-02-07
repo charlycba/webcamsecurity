@@ -12,6 +12,11 @@
 }
 
 body {
+  margin: 0;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  background: radial-gradient(circle at top left, #ffe7c7, #f3efe7 60%, #e8f0f1);
+  color: var(--ink);
+}
 
 .logs {
   margin-top: 18px;
@@ -37,11 +42,6 @@ body {
   font-size: 0.85rem;
   line-height: 1.4;
 }
-  margin: 0;
-  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
-  background: radial-gradient(circle at top left, #ffe7c7, #f3efe7 60%, #e8f0f1);
-  color: var(--ink);
-}
 
 .app {
   max-width: 900px;
@@ -63,11 +63,18 @@ body {
 
 .viewer {
   margin: 18px 0;
+  position: relative;
+}
+
+.monitor-frame {
   background: #000;
   border-radius: 16px;
-  overflow: hidden;
   box-shadow: 0 10px 30px var(--shadow);
-  position: relative;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  max-height: 55vh;
+  width: 100%;
+  margin: 0 auto;
 }
 
 .overlay {
@@ -107,8 +114,12 @@ body {
 video,
 img {
   width: 100%;
-  height: auto;
+  height: 100%;
   display: block;
+}
+
+#liveVideo {
+  object-fit: contain;
 }
 
 .controls,

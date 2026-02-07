@@ -14,7 +14,9 @@
       </header>
 
       <section class="viewer">
-        <video id="liveVideo" autoplay playsinline muted></video>
+        <div class="monitor-frame">
+          <video id="liveVideo" autoplay playsinline muted></video>
+        </div>
         <div class="overlay" aria-live="polite">
           <div class="overlay-card">
             <span class="info-label">IP del dispositivo</span>
@@ -120,6 +122,7 @@
         smoothedFps = 0;
         liveFps.textContent = "--";
         liveLatency.textContent = "--";
+        deviceIp.textContent = "Desconocida";
       }
 
       function startVideoFpsLoop() {
@@ -172,6 +175,13 @@
         const remoteCandidate = stats.get(selectedPair.remoteCandidateId);
         const localType = localCandidate ? localCandidate.candidateType : "desconocido";
         const remoteType = remoteCandidate ? remoteCandidate.candidateType : "desconocido";
+        const remoteAddress = remoteCandidate
+          ? (remoteCandidate.address || remoteCandidate.ip)
+          : null;
+
+        if (remoteAddress) {
+          deviceIp.textContent = remoteAddress;
+        }
 
         if (localType === "relay" || remoteType === "relay") {
           setStatus("WebRTC conectado. ICE relay detectado.");
