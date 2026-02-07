@@ -75,6 +75,18 @@ body {
   max-height: 55vh;
   width: 100%;
   margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  --zoom: 1;
+}
+
+.monitor-frame:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .overlay {
@@ -120,6 +132,36 @@ img {
 
 #liveVideo {
   object-fit: contain;
+  transform: scale(var(--zoom));
+  transform-origin: center;
+}
+
+.monitor-controls {
+  gap: 10px;
+}
+
+.zoom-control {
+  background: var(--card);
+  border-radius: 999px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 6px 18px var(--shadow);
+  font-weight: 600;
+}
+
+.zoom-control label {
+  font-size: 0.85rem;
+}
+
+.zoom-control input[type="range"] {
+  accent-color: var(--accent);
+}
+
+.zoom-control button {
+  padding: 8px 12px;
+  border-radius: 999px;
 }
 
 .controls,

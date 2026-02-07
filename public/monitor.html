@@ -14,7 +14,7 @@
       </header>
 
       <section class="viewer">
-        <div class="monitor-frame">
+        <div class="monitor-frame" id="monitorFrame">
           <video id="liveVideo" autoplay playsinline muted></video>
         </div>
         <div class="overlay" aria-live="polite">
@@ -37,7 +37,15 @@
         </div>
       </section>
 
-      <section class="controls">
+      <section class="controls monitor-controls">
+        <button id="fullscreenBtn" type="button">⛶ Pantalla completa</button>
+        <div class="zoom-control">
+          <button id="zoomOutBtn" type="button" aria-label="Reducir zoom">−</button>
+          <label for="zoomRange">Zoom</label>
+          <input id="zoomRange" type="range" min="1" max="2" step="0.1" value="1" />
+          <span id="zoomValue">100%</span>
+          <button id="zoomInBtn" type="button" aria-label="Aumentar zoom">+</button>
+        </div>
         <a id="openLogs" href="/monitor.html?logs=1" target="_blank" rel="noopener">Ver logs</a>
       </section>
 
@@ -51,11 +59,17 @@
 
     <script>
       const liveVideo = document.getElementById("liveVideo");
+      const monitorFrame = document.getElementById("monitorFrame");
       const status = document.getElementById("status");
       const deviceIp = document.getElementById("deviceIp");
       const deviceQuality = document.getElementById("deviceQuality");
       const liveFps = document.getElementById("liveFps");
       const liveLatency = document.getElementById("liveLatency");
+      const fullscreenBtn = document.getElementById("fullscreenBtn");
+      const zoomRange = document.getElementById("zoomRange");
+      const zoomValue = document.getElementById("zoomValue");
+      const zoomOutBtn = document.getElementById("zoomOutBtn");
+      const zoomInBtn = document.getElementById("zoomInBtn");
       const logsSection = document.getElementById("logsSection");
       const logsContent = document.getElementById("logsContent");
       const logs = [];
@@ -72,6 +86,30 @@
 
       if (showLogs) {
         logsSection.classList.remove("hidden");
+      }
+
+      function updateZoomDisplay(value) {
+        zoomValue.textContent = `${Math.round(value * 100)}%`;
+        monitorFrame.style.setProperty("--zoom", value);
+      }
+
+      function clampZoom(value) {
+        const min = Number(zoomRange.min);
+        const max = Number(zoomRange.max);
+        return Math.min(max, Math.max(min, value));
+      }
+
+      function toggleFullscreen() {
+        if (!document.fullscreenElement) {
+          monitorFrame.requestFullscreen().catch(() => {});
+          return;
+        }
+        document.exitFullscreen().catch(() => {});
+      }
+
+      function updateFullscreenLabel() {
+        const isFullscreen = document.fullscreenElement === monitorFrame;
+        fullscreenBtn.textContent = isFullscreen ? "Salir pantalla completa" : "⛶ Pantalla completa";
       }
 
       function setStatus(message) {
@@ -280,6 +318,25 @@
       }
 
       connectLive();
+
+      updateZoomDisplay(Number(zoomRange.value));
+      zoomRange.addEventListener("input", () => {
+        updateZoomDisplay(Number(zoomRange.value));
+      });
+      zoomOutBtn.addEventListener("click", () => {
+        const value = clampZoom(Number(zoomRange.value) - Number(zoomRange.step));
+        zoomRange.value = value.toString();
+        updateZoomDisplay(value);
+      });
+      zoomInBtn.addEventListener("click", () => {
+        const value = clampZoom(Number(zoomRange.value) + Number(zoomRange.step));
+        zoomRange.value = value.toString();
+        updateZoomDisplay(value);
+      });
+      fullscreenBtn.addEventListener("click", toggleFullscreen);
+      monitorFrame.addEventListener("dblclick", toggleFullscreen);
+      document.addEventListener("fullscreenchange", updateFullscreenLabel);
+      updateFullscreenLabel();
 
       if (showLogs) {
         setInterval(() => {
