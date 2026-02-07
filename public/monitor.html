@@ -47,11 +47,14 @@
           <button id="zoomInBtn" type="button" aria-label="Aumentar zoom">+</button>
         </div>
         <button id="resetZoomBtn" type="button">Reset zoom</button>
-        <a id="openLogs" href="/monitor.html?logs=1" target="_blank" rel="noopener">Ver logs</a>
+        <button id="toggleLogsBtn" type="button">🧾 Ver logs</button>
       </section>
 
-      <section class="logs hidden" id="logsSection">
-        <h2>Logs de transmision</h2>
+      <section class="log-panel hidden" id="logsPanel" aria-live="polite">
+        <div class="log-panel__header">
+          <h2>Logs en vivo</h2>
+          <button id="closeLogsBtn" type="button">Cerrar</button>
+        </div>
         <pre id="logsContent"></pre>
       </section>
 
@@ -72,10 +75,13 @@
       const zoomOutBtn = document.getElementById("zoomOutBtn");
       const zoomInBtn = document.getElementById("zoomInBtn");
       const resetZoomBtn = document.getElementById("resetZoomBtn");
-      const logsSection = document.getElementById("logsSection");
+      const logsPanel = document.getElementById("logsPanel");
       const logsContent = document.getElementById("logsContent");
+      const toggleLogsBtn = document.getElementById("toggleLogsBtn");
+      const closeLogsBtn = document.getElementById("closeLogsBtn");
       const logs = [];
-      let lastStoredSize = 0;
+      const maxLogs = 400;
+      let logsOpen = false;
       let lastFrameAt = 0;
       let smoothedFps = 0;
       let lastMeta = null;
@@ -83,17 +89,11 @@
       let rtcDataChannel = null;
       let webrtcActive = false;
 
-      const params = new URLSearchParams(window.location.search);
-      const showLogs = params.get("logs") === "1";
       let panX = 0;
       let panY = 0;
       let isPanning = false;
       let dragStartX = 0;
       let dragStartY = 0;
-
-      if (showLogs) {
-        logsSection.classList.remove("hidden");
-      }
 
       function applyTransform() {
         monitorFrame.style.setProperty("--pan-x", `${panX}px`);
@@ -161,21 +161,50 @@
         return `[${time}] ${message}`;
       }
 
-      function persistLogs() {
-        localStorage.setItem("monitorLogs", JSON.stringify(logs.slice(-200)));
-      }
-
-      function renderLogs(entries) {
-        logsContent.textContent = entries.join("\n");
-      }
-
       function addLog(message) {
         const entry = formatLog(message);
         logs.push(entry);
-        if (showLogs) {
-          renderLogs(logs);
+        if (logs.length > maxLogs) {
+          logs.splice(0, logs.length - maxLogs);
         }
-        persistLogs();
+        logsContent.textContent = logs.join("\n");
+        if (logsOpen) {
+          logsContent.scrollTop = logsContent.scrollHeight;
+        }
+      }
+
+      function setLogsOpen(open) {
+        logsOpen = open;
+        logsPanel.classList.toggle("hidden", !open);
+        toggleLogsBtn.textContent = open ? "Ocultar logs" : "🧾 Ver logs";
+        if (open) {
+          logsContent.textContent = logs.join("\n");
+          logsContent.scrollTop = logsContent.scrollHeight;
+        }
+      }
+
+      function stringifyArg(arg) {
+        if (typeof arg === "string") {
+          return arg;
+        }
+        try {
+          return JSON.stringify(arg);
+        } catch (_error) {
+          return String(arg);
+        }
+      }
+
+      function hookConsole() {
+        const levels = ["log", "info", "warn", "error"];
+        const nativeConsole = {};
+        levels.forEach((level) => {
+          nativeConsole[level] = console[level].bind(console);
+          console[level] = (...args) => {
+            nativeConsole[level](...args);
+            const message = args.map(stringifyArg).join(" ");
+            addLog(`${level.toUpperCase()}: ${message}`);
+          };
+        });
       }
 
       function updateStats(now) {
@@ -333,6 +362,13 @@
             return;
           }
 
+          if (payload && payload.type === "server-log") {
+            const level = payload.level ? payload.level.toUpperCase() : "INFO";
+            const message = payload.message || "";
+            addLog(`SERVER ${level}: ${message}`);
+            return;
+          }
+
           if (payload && payload.type === "webrtc-offer" && payload.sdp) {
             handleOffer(socket, payload.sdp);
             return;
@@ -358,6 +394,7 @@
       }
 
       connectLive();
+      hookConsole();
 
       updateZoomDisplay(Number(zoomRange.value));
       zoomRange.addEventListener("input", () => {
@@ -376,6 +413,12 @@
       resetZoomBtn.addEventListener("click", () => {
         zoomRange.value = "1";
         updateZoomDisplay(1);
+      });
+      toggleLogsBtn.addEventListener("click", () => {
+        setLogsOpen(!logsOpen);
+      });
+      closeLogsBtn.addEventListener("click", () => {
+        setLogsOpen(false);
       });
       fullscreenBtn.addEventListener("click", toggleFullscreen);
       monitorFrame.addEventListener("dblclick", () => {

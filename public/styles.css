@@ -18,29 +18,47 @@ body {
   color: var(--ink);
 }
 
-.logs {
-  margin-top: 18px;
-  background: var(--card);
-  border-radius: 16px;
-  padding: 16px;
-  box-shadow: 0 10px 22px var(--shadow);
-}
-
-.logs h2 {
-  margin: 0 0 10px 0;
-  font-size: 1.1rem;
-}
-
-.logs pre {
-  margin: 0;
-  max-height: 280px;
-  overflow: auto;
-  background: #1b1b1b;
+.log-panel {
+  position: fixed;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  width: min(900px, calc(100% - 24px));
+  background: #111;
   color: #f6f2ea;
-  padding: 12px;
+  border-radius: 16px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  padding: 12px 12px 10px 12px;
+  max-height: 35vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 20;
+}
+
+.log-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.log-panel h2 {
+  margin: 0;
+  font-size: 1rem;
+  color: #f6f2ea;
+}
+
+.log-panel pre {
+  margin: 0;
+  overflow: auto;
+  background: #0b0b0b;
+  color: #f6f2ea;
+  padding: 10px;
   border-radius: 12px;
   font-size: 0.85rem;
   line-height: 1.4;
+  font-family: "SFMono-Regular", "Menlo", "Monaco", "Consolas", "Liberation Mono", "Courier New", monospace;
 }
 
 .app {

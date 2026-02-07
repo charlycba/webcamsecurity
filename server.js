@@ -26,6 +26,43 @@ const server = https.createServer({
 }, app);
 
 const wss = new WebSocketServer({ server });
+const nativeConsole = {
+  log: console.log.bind(console),
+  info: console.info.bind(console),
+  warn: console.warn.bind(console),
+  error: console.error.bind(console)
+};
+
+function broadcastServerLog(level, message) {
+  const payload = JSON.stringify({
+    type: "server-log",
+    level,
+    message,
+    ts: Date.now()
+  });
+  wss.clients.forEach((client) => {
+    if (client.readyState === client.OPEN) {
+      client.send(payload);
+    }
+  });
+}
+
+["log", "info", "warn", "error"].forEach((level) => {
+  console[level] = (...args) => {
+    nativeConsole[level](...args);
+    const message = args.map((arg) => {
+      if (typeof arg === "string") {
+        return arg;
+      }
+      try {
+        return JSON.stringify(arg);
+      } catch (_error) {
+        return String(arg);
+      }
+    }).join(" ");
+    broadcastServerLog(level, message);
+  };
+});
 
 function broadcast(data, exceptSocket) {
   wss.clients.forEach((client) => {
