@@ -59,32 +59,33 @@
             <span class="info-value" id="liveLatency">--</span>
           </div>
         </div>
-        <aside class="log-panel hidden" id="logsPanel" aria-live="polite">
-          <div class="log-panel__header">
-            <h2>Logs en vivo</h2>
-            <div class="log-panel__actions">
-              <label class="log-toggle">
-                <input type="checkbox" id="filterFrontend" checked />
-                Frontend
-              </label>
-              <label class="log-toggle">
-                <input type="checkbox" id="filterServer" checked />
-                Servidor
-              </label>
-              <label class="log-toggle">
-                <input type="checkbox" id="filterSignal" checked />
-                WebRTC
-              </label>
-              <label class="log-toggle">
-                <input type="checkbox" id="pauseScroll" />
-                Pausar auto-scroll
-              </label>
-              <button id="closeLogsBtn" type="button">Cerrar</button>
-            </div>
-          </div>
-          <div id="logsContent" class="log-panel__content" role="log" aria-live="polite"></div>
-        </aside>
       </section>
+
+      <aside class="log-panel" id="logsPanel" aria-live="polite" aria-hidden="true">
+        <div class="log-panel__header">
+          <h2>Logs en vivo</h2>
+          <div class="log-panel__actions">
+            <label class="log-toggle">
+              <input type="checkbox" id="filterFrontend" checked />
+              Frontend
+            </label>
+            <label class="log-toggle">
+              <input type="checkbox" id="filterServer" checked />
+              Servidor
+            </label>
+            <label class="log-toggle">
+              <input type="checkbox" id="filterSignal" checked />
+              WebRTC
+            </label>
+            <label class="log-toggle">
+              <input type="checkbox" id="pauseScroll" />
+              Pausar auto-scroll
+            </label>
+            <button id="closeLogsBtn" type="button">Cerrar</button>
+          </div>
+        </div>
+        <div id="logsContent" class="log-panel__content" role="log" aria-live="polite"></div>
+      </aside>
 
       <section class="controls monitor-controls">
         <button id="fullscreenBtn" type="button">⛶ Pantalla completa</button>
@@ -97,7 +98,7 @@
           <button id="zoomInBtn" type="button" aria-label="Aumentar zoom">+</button>
         </div>
         <button id="resetZoomBtn" type="button">Reset zoom</button>
-        <button id="toggleLogsBtn" type="button">Mostrar logs</button>
+        <button id="toggleLogsBtn" type="button" aria-controls="logsPanel" aria-expanded="false">Ver logs</button>
       </section>
 
       <section class="status" id="status"></section>
@@ -233,9 +234,14 @@
         };
         logs.push(entry);
         if (logs.length > maxLogs) {
-          logs.splice(0, logs.length - maxLogs);
+          const removed = logs.splice(0, logs.length - maxLogs);
+          removed.forEach((item) => {
+            if (item.row) {
+              item.row.remove();
+            }
+          });
         }
-        renderLogs();
+        appendLogRow(entry);
       }
 
       function allowLog(entry) {
@@ -251,30 +257,48 @@
         return true;
       }
 
-      function renderLogs() {
-        const fragment = document.createDocumentFragment();
-        logs.forEach((entry) => {
-          if (!allowLog(entry)) {
-            return;
-          }
-          const row = document.createElement("div");
-          row.className = `log-row log-${entry.source} log-${entry.level}`;
-          const time = document.createElement("span");
-          time.className = "log-time";
-          time.textContent = entry.ts;
-          const origin = document.createElement("span");
-          origin.className = "log-origin";
-          origin.textContent = entry.level === "error"
-            ? "ERROR"
-            : entry.source.toUpperCase();
-          const msg = document.createElement("span");
-          msg.className = "log-message";
-          msg.textContent = entry.message;
-          row.append(time, origin, msg);
-          fragment.appendChild(row);
-        });
-        logsContent.textContent = "";
-        logsContent.appendChild(fragment);
+      function getLogLabel(source) {
+        if (source === "signal") {
+          return "WEBRTC";
+        }
+        if (source === "server") {
+          return "SERVER";
+        }
+        return "FRONTEND";
+      }
+
+      function applyFiltersToRow(row) {
+        const source = row.dataset.source;
+        const allowed = allowLog({ source });
+        row.classList.toggle("log-row--hidden", !allowed);
+        row.setAttribute("aria-hidden", allowed ? "false" : "true");
+      }
+
+      function refreshLogFilters() {
+        const rows = logsContent.querySelectorAll(".log-row");
+        rows.forEach((row) => applyFiltersToRow(row));
+        if (logsOpen && !pauseScroll.checked) {
+          logsContent.scrollTop = logsContent.scrollHeight;
+        }
+      }
+
+      function appendLogRow(entry) {
+        const row = document.createElement("div");
+        row.className = `log-row log-${entry.source} log-${entry.level}`;
+        row.dataset.source = entry.source;
+        const time = document.createElement("span");
+        time.className = "log-time";
+        time.textContent = entry.ts;
+        const origin = document.createElement("span");
+        origin.className = "log-origin";
+        origin.textContent = getLogLabel(entry.source);
+        const msg = document.createElement("span");
+        msg.className = "log-message";
+        msg.textContent = entry.message;
+        row.append(time, origin, msg);
+        entry.row = row;
+        applyFiltersToRow(row);
+        logsContent.appendChild(row);
         if (logsOpen && !pauseScroll.checked) {
           logsContent.scrollTop = logsContent.scrollHeight;
         }
@@ -282,13 +306,12 @@
 
       function setLogsOpen(open) {
         logsOpen = open;
-        logsPanel.classList.toggle("hidden", !open);
-        toggleLogsBtn.textContent = open ? "Ocultar logs" : "Mostrar logs";
+        logsPanel.classList.toggle("is-open", open);
+        logsPanel.setAttribute("aria-hidden", open ? "false" : "true");
+        toggleLogsBtn.textContent = open ? "Ocultar logs" : "Ver logs";
+        toggleLogsBtn.setAttribute("aria-expanded", open ? "true" : "false");
         if (open) {
-          renderLogs();
-          if (!pauseScroll.checked) {
-            logsContent.scrollTop = logsContent.scrollHeight;
-          }
+          refreshLogFilters();
         }
       }
 
@@ -684,10 +707,14 @@
       metricsToggleBtn.addEventListener("click", () => {
         setMetricsVisible(!showMetrics);
       });
-      filterFrontend.addEventListener("change", renderLogs);
-      filterServer.addEventListener("change", renderLogs);
-      filterSignal.addEventListener("change", renderLogs);
-      pauseScroll.addEventListener("change", renderLogs);
+      filterFrontend.addEventListener("change", refreshLogFilters);
+      filterServer.addEventListener("change", refreshLogFilters);
+      filterSignal.addEventListener("change", refreshLogFilters);
+      pauseScroll.addEventListener("change", () => {
+        if (!pauseScroll.checked && logsOpen) {
+          logsContent.scrollTop = logsContent.scrollHeight;
+        }
+      });
       fullscreenBtn.addEventListener("click", toggleFullscreen);
       monitorFrame.addEventListener("dblclick", () => {
         if (Number(zoomRange.value) > 1) {

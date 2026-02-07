@@ -19,23 +19,29 @@ body {
 }
 
 .log-panel {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 12px;
-  width: auto;
-  background: rgba(0, 0, 0, 0.6);
+  --log-panel-height: 260px;
+  background: rgba(0, 0, 0, 0.7);
   color: #f6f2ea;
   border-radius: 14px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
-  padding: 10px;
-  max-height: 30%;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
   display: flex;
   flex-direction: column;
   gap: 8px;
   backdrop-filter: blur(3px);
   pointer-events: auto;
-  z-index: 5;
+  margin-top: 0;
+  padding: 0 12px;
+  height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: height 0.28s ease, opacity 0.2s ease, margin-top 0.25s ease, padding 0.28s ease;
+}
+
+.log-panel.is-open {
+  height: var(--log-panel-height);
+  opacity: 1;
+  margin-top: 14px;
+  padding: 10px 12px;
 }
 
 .log-panel__header {
@@ -61,7 +67,8 @@ body {
 
 .log-panel__content {
   margin: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: #0b0b0b;
   color: #f6f2ea;
   padding: 10px;
@@ -72,7 +79,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 22vh;
+  flex: 1;
 }
 
 .log-row {
@@ -80,6 +87,10 @@ body {
   grid-template-columns: auto auto 1fr;
   gap: 8px;
   align-items: baseline;
+}
+
+.log-row--hidden {
+  display: none;
 }
 
 .log-time {
@@ -98,7 +109,7 @@ body {
 }
 
 .log-frontend .log-origin {
-  color: #7adf9c;
+  color: #7aa7ff;
 }
 
 .log-server .log-origin {
@@ -106,7 +117,7 @@ body {
 }
 
 .log-signal .log-origin {
-  color: #7aa7ff;
+  color: #7adf9c;
 }
 
 .log-warn .log-message {
