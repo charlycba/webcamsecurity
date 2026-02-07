@@ -34,13 +34,18 @@ https://IP_DEL_HOST:8443/monitor.html
 
 ## Controles del monitor
 - Boton de pantalla completa (doble click en el video tambien alterna fullscreen).
-- Zoom visual con slider y botones +/− sin afectar el stream.
+- Zoom visual con slider, botones +/− y rueda del mouse.
+- Pan con drag cuando el zoom es mayor a 100%.
+- Reset de zoom para volver al centro.
+- Toggle de metricas (HUD) para ocultar/mostrar la telemetria.
+- Logs en vivo con panel inferior, filtros y auto-scroll.
 
 ## Como funciona
 - La pagina web usa `navigator.mediaDevices.getUserMedia()` para pedir permiso de camara.
 - El video se envia por WebRTC (RTCPeerConnection) con prioridad a baja latencia y alto FPS.
 - El WebSocket se usa solo para signaling (SDP + ICE).
 - El monitor recibe el stream en un `<video>` con `autoplay`, `playsinline` y `muted`.
+- El monitor recolecta metricas con `RTCPeerConnection.getStats()`.
 
 ## Streaming en vivo
 - El monitor muestra video en tiempo real via WebRTC.
