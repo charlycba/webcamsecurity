@@ -73,6 +73,13 @@ function broadcast(data, exceptSocket) {
 }
 
 wss.on("connection", (socket) => {
+  console.info("WebSocket conectado.");
+  let iceCount = 0;
+
+  socket.on("close", () => {
+    console.info("WebSocket desconectado.");
+  });
+
   socket.on("message", (raw, isBinary) => {
     if (isBinary && Buffer.isBuffer(raw)) {
       return;
@@ -82,6 +89,15 @@ wss.on("connection", (socket) => {
     try {
       const payload = JSON.parse(text);
       if (payload && payload.type && payload.type.startsWith("webrtc-")) {
+        if (payload.type === "webrtc-offer" || payload.type === "webrtc-answer") {
+          console.info(`Signaling: ${payload.type}.`);
+        }
+        if (payload.type === "webrtc-ice") {
+          iceCount += 1;
+          if (iceCount === 1 || iceCount % 10 === 0) {
+            console.info(`Signaling: webrtc-ice (${iceCount}).`);
+          }
+        }
         broadcast(JSON.stringify(payload), socket);
       }
     } catch (_error) {

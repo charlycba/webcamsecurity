@@ -53,9 +53,27 @@
       <section class="log-panel hidden" id="logsPanel" aria-live="polite">
         <div class="log-panel__header">
           <h2>Logs en vivo</h2>
-          <button id="closeLogsBtn" type="button">Cerrar</button>
+          <div class="log-panel__actions">
+            <label class="log-toggle">
+              <input type="checkbox" id="filterFrontend" checked />
+              Frontend
+            </label>
+            <label class="log-toggle">
+              <input type="checkbox" id="filterServer" checked />
+              Servidor
+            </label>
+            <label class="log-toggle">
+              <input type="checkbox" id="filterSignal" checked />
+              Signal
+            </label>
+            <label class="log-toggle">
+              <input type="checkbox" id="pauseScroll" />
+              Pausar auto-scroll
+            </label>
+            <button id="closeLogsBtn" type="button">Cerrar</button>
+          </div>
         </div>
-        <pre id="logsContent"></pre>
+        <div id="logsContent" class="log-panel__content" role="log" aria-live="polite"></div>
       </section>
 
       <section class="status" id="status"></section>
@@ -79,6 +97,10 @@
       const logsContent = document.getElementById("logsContent");
       const toggleLogsBtn = document.getElementById("toggleLogsBtn");
       const closeLogsBtn = document.getElementById("closeLogsBtn");
+      const filterFrontend = document.getElementById("filterFrontend");
+      const filterServer = document.getElementById("filterServer");
+      const filterSignal = document.getElementById("filterSignal");
+      const pauseScroll = document.getElementById("pauseScroll");
       const logs = [];
       const maxLogs = 400;
       let logsOpen = false;
@@ -88,6 +110,8 @@
       let rtcPeer = null;
       let rtcDataChannel = null;
       let webrtcActive = false;
+      let iceInCount = 0;
+      let iceOutCount = 0;
 
       let panX = 0;
       let panY = 0;
@@ -156,19 +180,56 @@
         status.textContent = message;
       }
 
-      function formatLog(message) {
-        const time = new Date().toLocaleTimeString();
-        return `[${time}] ${message}`;
-      }
-
-      function addLog(message) {
-        const entry = formatLog(message);
+      function addLog({ source, level, message }) {
+        const entry = {
+          ts: new Date().toLocaleTimeString(),
+          source,
+          level,
+          message
+        };
         logs.push(entry);
         if (logs.length > maxLogs) {
           logs.splice(0, logs.length - maxLogs);
         }
-        logsContent.textContent = logs.join("\n");
-        if (logsOpen) {
+        renderLogs();
+      }
+
+      function allowLog(entry) {
+        if (entry.source === "frontend" && !filterFrontend.checked) {
+          return false;
+        }
+        if (entry.source === "server" && !filterServer.checked) {
+          return false;
+        }
+        if (entry.source === "signal" && !filterSignal.checked) {
+          return false;
+        }
+        return true;
+      }
+
+      function renderLogs() {
+        const fragment = document.createDocumentFragment();
+        logs.forEach((entry) => {
+          if (!allowLog(entry)) {
+            return;
+          }
+          const row = document.createElement("div");
+          row.className = `log-row log-${entry.source} log-${entry.level}`;
+          const time = document.createElement("span");
+          time.className = "log-time";
+          time.textContent = entry.ts;
+          const origin = document.createElement("span");
+          origin.className = "log-origin";
+          origin.textContent = entry.source.toUpperCase();
+          const msg = document.createElement("span");
+          msg.className = "log-message";
+          msg.textContent = entry.message;
+          row.append(time, origin, msg);
+          fragment.appendChild(row);
+        });
+        logsContent.textContent = "";
+        logsContent.appendChild(fragment);
+        if (logsOpen && !pauseScroll.checked) {
           logsContent.scrollTop = logsContent.scrollHeight;
         }
       }
@@ -178,8 +239,10 @@
         logsPanel.classList.toggle("hidden", !open);
         toggleLogsBtn.textContent = open ? "Ocultar logs" : "🧾 Ver logs";
         if (open) {
-          logsContent.textContent = logs.join("\n");
-          logsContent.scrollTop = logsContent.scrollHeight;
+          renderLogs();
+          if (!pauseScroll.checked) {
+            logsContent.scrollTop = logsContent.scrollHeight;
+          }
         }
       }
 
@@ -202,9 +265,13 @@
           console[level] = (...args) => {
             nativeConsole[level](...args);
             const message = args.map(stringifyArg).join(" ");
-            addLog(`${level.toUpperCase()}: ${message}`);
+            addLog({ source: "frontend", level, message });
           };
         });
+      }
+
+      function logSignal(message) {
+        addLog({ source: "signal", level: "info", message });
       }
 
       function updateStats(now) {
@@ -300,6 +367,8 @@
 
       async function handleOffer(socket, sdp) {
         stopWebRtc();
+        iceInCount = 0;
+        iceOutCount = 0;
         rtcPeer = new RTCPeerConnection({
           iceServers: [],
           bundlePolicy: "max-bundle",
@@ -308,20 +377,35 @@
         rtcPeer.onicecandidate = (event) => {
           if (event.candidate) {
             socket.send(JSON.stringify({ type: "webrtc-ice", candidate: event.candidate }));
+            iceOutCount += 1;
+            if (iceOutCount === 1 || iceOutCount % 10 === 0) {
+              logSignal(`ICE enviado (${iceOutCount})`);
+            }
           }
         };
         rtcPeer.onconnectionstatechange = () => {
+          logSignal(`Estado conexion: ${rtcPeer.connectionState}`);
           if (rtcPeer.connectionState === "connected") {
             updateIceInfo();
           }
+        };
+        rtcPeer.onsignalingstatechange = () => {
+          logSignal(`Estado signaling: ${rtcPeer.signalingState}`);
         };
         rtcPeer.ontrack = (event) => {
           webrtcActive = true;
           liveVideo.srcObject = event.streams[0];
           startVideoFpsLoop();
+          logSignal("Track de video recibido.");
         };
         rtcPeer.ondatachannel = (event) => {
           rtcDataChannel = event.channel;
+          rtcDataChannel.addEventListener("open", () => {
+            logSignal("DataChannel abierto.");
+          });
+          rtcDataChannel.addEventListener("close", () => {
+            logSignal("DataChannel cerrado.");
+          });
           rtcDataChannel.addEventListener("message", (msgEvent) => {
             let payload = null;
             try {
@@ -340,9 +424,11 @@
         };
 
         await rtcPeer.setRemoteDescription(sdp);
+        logSignal("Offer recibido.");
         const answer = await rtcPeer.createAnswer();
         await rtcPeer.setLocalDescription(answer);
         socket.send(JSON.stringify({ type: "webrtc-answer", sdp: rtcPeer.localDescription }));
+        logSignal("Answer enviado.");
       }
 
       function connectLive() {
@@ -351,7 +437,7 @@
 
         socket.addEventListener("open", () => {
           setStatus("Conectado a signaling.");
-          addLog("Conectado a signaling.");
+          addLog({ source: "signal", level: "info", message: "Conectado a signaling." });
         });
 
         socket.addEventListener("message", (event) => {
@@ -363,9 +449,9 @@
           }
 
           if (payload && payload.type === "server-log") {
-            const level = payload.level ? payload.level.toUpperCase() : "INFO";
+            const level = payload.level ? payload.level.toLowerCase() : "info";
             const message = payload.message || "";
-            addLog(`SERVER ${level}: ${message}`);
+            addLog({ source: "server", level, message });
             return;
           }
 
@@ -376,19 +462,23 @@
 
           if (payload && payload.type === "webrtc-ice" && rtcPeer && payload.candidate) {
             rtcPeer.addIceCandidate(payload.candidate);
+            iceInCount += 1;
+            if (iceInCount === 1 || iceInCount % 10 === 0) {
+              logSignal(`ICE recibido (${iceInCount})`);
+            }
             return;
           }
         });
 
         socket.addEventListener("close", () => {
           setStatus("Signaling desconectado.");
-          addLog("Signaling desconectado.");
+          addLog({ source: "signal", level: "warn", message: "Signaling desconectado." });
           stopWebRtc();
         });
 
         socket.addEventListener("error", () => {
           setStatus("Error en signaling.");
-          addLog("Error en signaling.");
+          addLog({ source: "signal", level: "error", message: "Error en signaling." });
           stopWebRtc();
         });
       }
@@ -420,6 +510,10 @@
       closeLogsBtn.addEventListener("click", () => {
         setLogsOpen(false);
       });
+      filterFrontend.addEventListener("change", renderLogs);
+      filterServer.addEventListener("change", renderLogs);
+      filterSignal.addEventListener("change", renderLogs);
+      pauseScroll.addEventListener("change", renderLogs);
       fullscreenBtn.addEventListener("click", toggleFullscreen);
       monitorFrame.addEventListener("dblclick", () => {
         if (Number(zoomRange.value) > 1) {
@@ -497,25 +591,6 @@
         zoomRange.value = nextZoom.toString();
         updateZoomDisplay(nextZoom);
       }, { passive: false });
-
-      if (showLogs) {
-        setInterval(() => {
-          const stored = localStorage.getItem("monitorLogs");
-          if (!stored) {
-            return;
-          }
-          if (stored.length === lastStoredSize) {
-            return;
-          }
-          lastStoredSize = stored.length;
-          try {
-            const entries = JSON.parse(stored);
-            renderLogs(entries);
-          } catch (_error) {
-            return;
-          }
-        }, 1000);
-      }
     </script>
   </body>
 </html>
