@@ -143,7 +143,7 @@
       const logs = [];
       const maxLogs = 400;
       let logsOpen = false;
-      let showMetrics = true;
+      let showMetrics = false;
       let lastFrameAt = 0;
       let smoothedFps = 0;
       let lastMeta = null;
@@ -678,7 +678,7 @@
       hookConsole();
       updateClientInfo();
       document.addEventListener("visibilitychange", updateVisibility);
-      setMetricsVisible(true);
+      setMetricsVisible(false);
 
       updateZoomDisplay(Number(zoomRange.value));
       zoomRange.addEventListener("input", () => {
