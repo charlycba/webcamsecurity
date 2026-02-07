@@ -26,22 +26,32 @@ Accede desde el telefono con:
 https://IP_DEL_HOST:8443
 ```
 
-Monitor (ultimo snapshot):
+Monitor (video en vivo):
 
 ```
 https://IP_DEL_HOST:8443/monitor.html
 ```
 
+## Controles del monitor
+- Boton de pantalla completa (doble click en el video tambien alterna fullscreen).
+- Zoom visual con slider y botones +/− sin afectar el stream.
+
 ## Como funciona
 - La pagina web usa `navigator.mediaDevices.getUserMedia()` para pedir permiso de camara.
-- El video se muestra en un `<video>` en tiempo real.
-- El navegador envia frames por WebSocket para streaming en vivo.
-- Si activas snapshots, el navegador captura un frame con `<canvas>` y lo envia al backend.
-- El backend guarda el ultimo snapshot en `/snapshots/latest.jpg` para el monitor.
+- El video se envia por WebRTC (RTCPeerConnection) con prioridad a baja latencia y alto FPS.
+- El WebSocket se usa solo para signaling (SDP + ICE).
+- El monitor recibe el stream en un `<video>` con `autoplay`, `playsinline` y `muted`.
 
 ## Streaming en vivo
-- El monitor usa WebSocket para mostrar video en vivo.
-- Si el streaming no esta disponible, cae a snapshots cada 5s.
+- El monitor muestra video en tiempo real via WebRTC.
+- En red local se usan candidatos ICE host (sin TURN).
+
+## Tecnologias usadas
+- Node.js + Express para el servidor HTTPS.
+- WebRTC nativo (RTCPeerConnection) para video en tiempo real.
+- WebSocket para signaling (SDP + ICE).
+- HTML/CSS/JavaScript en el frontend.
+- Docker para el despliegue local.
 
 ## Nota sobre HTTPS
 La API de camara requiere HTTPS (o localhost). En la LAN necesitas un certificado TLS. Puedes:

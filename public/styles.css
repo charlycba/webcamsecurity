@@ -79,6 +79,9 @@ body {
   align-items: center;
   justify-content: center;
   --zoom: 1;
+  --pan-x: 0px;
+  --pan-y: 0px;
+  touch-action: none;
 }
 
 .monitor-frame:fullscreen {
@@ -132,8 +135,13 @@ img {
 
 #liveVideo {
   object-fit: contain;
-  transform: scale(var(--zoom));
+  transform: translate(var(--pan-x), var(--pan-y)) scale(var(--zoom));
   transform-origin: center;
+  cursor: grab;
+}
+
+.monitor-frame.is-panning #liveVideo {
+  cursor: grabbing;
 }
 
 .monitor-controls {

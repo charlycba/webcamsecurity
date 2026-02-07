@@ -46,6 +46,7 @@
           <span id="zoomValue">100%</span>
           <button id="zoomInBtn" type="button" aria-label="Aumentar zoom">+</button>
         </div>
+        <button id="resetZoomBtn" type="button">Reset zoom</button>
         <a id="openLogs" href="/monitor.html?logs=1" target="_blank" rel="noopener">Ver logs</a>
       </section>
 
@@ -70,6 +71,7 @@
       const zoomValue = document.getElementById("zoomValue");
       const zoomOutBtn = document.getElementById("zoomOutBtn");
       const zoomInBtn = document.getElementById("zoomInBtn");
+      const resetZoomBtn = document.getElementById("resetZoomBtn");
       const logsSection = document.getElementById("logsSection");
       const logsContent = document.getElementById("logsContent");
       const logs = [];
@@ -83,14 +85,52 @@
 
       const params = new URLSearchParams(window.location.search);
       const showLogs = params.get("logs") === "1";
+      let panX = 0;
+      let panY = 0;
+      let isPanning = false;
+      let dragStartX = 0;
+      let dragStartY = 0;
 
       if (showLogs) {
         logsSection.classList.remove("hidden");
       }
 
+      function applyTransform() {
+        monitorFrame.style.setProperty("--pan-x", `${panX}px`);
+        monitorFrame.style.setProperty("--pan-y", `${panY}px`);
+      }
+
+      function clampPan(value, limit) {
+        return Math.min(limit, Math.max(-limit, value));
+      }
+
+      function computePanLimits() {
+        const zoom = Number(zoomRange.value);
+        if (zoom <= 1) {
+          return { limitX: 0, limitY: 0 };
+        }
+        const limitX = (monitorFrame.clientWidth * (zoom - 1)) / 2;
+        const limitY = (monitorFrame.clientHeight * (zoom - 1)) / 2;
+        return { limitX, limitY };
+      }
+
+      function centerPan() {
+        panX = 0;
+        panY = 0;
+        applyTransform();
+      }
+
       function updateZoomDisplay(value) {
         zoomValue.textContent = `${Math.round(value * 100)}%`;
         monitorFrame.style.setProperty("--zoom", value);
+        if (value <= 1) {
+          centerPan();
+        } else {
+          const limits = computePanLimits();
+          panX = clampPan(panX, limits.limitX);
+          panY = clampPan(panY, limits.limitY);
+          applyTransform();
+        }
       }
 
       function clampZoom(value) {
@@ -333,10 +373,63 @@
         zoomRange.value = value.toString();
         updateZoomDisplay(value);
       });
+      resetZoomBtn.addEventListener("click", () => {
+        zoomRange.value = "1";
+        updateZoomDisplay(1);
+      });
       fullscreenBtn.addEventListener("click", toggleFullscreen);
-      monitorFrame.addEventListener("dblclick", toggleFullscreen);
+      monitorFrame.addEventListener("dblclick", () => {
+        if (Number(zoomRange.value) > 1) {
+          centerPan();
+          return;
+        }
+        toggleFullscreen();
+      });
       document.addEventListener("fullscreenchange", updateFullscreenLabel);
       updateFullscreenLabel();
+
+      monitorFrame.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) {
+          return;
+        }
+        if (Number(zoomRange.value) <= 1) {
+          return;
+        }
+        isPanning = true;
+        dragStartX = event.clientX - panX;
+        dragStartY = event.clientY - panY;
+        monitorFrame.classList.add("is-panning");
+        monitorFrame.setPointerCapture(event.pointerId);
+        event.preventDefault();
+      });
+
+      monitorFrame.addEventListener("pointermove", (event) => {
+        if (!isPanning) {
+          return;
+        }
+        const limits = computePanLimits();
+        panX = clampPan(event.clientX - dragStartX, limits.limitX);
+        panY = clampPan(event.clientY - dragStartY, limits.limitY);
+        applyTransform();
+      });
+
+      monitorFrame.addEventListener("pointerup", (event) => {
+        if (!isPanning) {
+          return;
+        }
+        isPanning = false;
+        monitorFrame.classList.remove("is-panning");
+        monitorFrame.releasePointerCapture(event.pointerId);
+      });
+
+      monitorFrame.addEventListener("pointercancel", (event) => {
+        if (!isPanning) {
+          return;
+        }
+        isPanning = false;
+        monitorFrame.classList.remove("is-panning");
+        monitorFrame.releasePointerCapture(event.pointerId);
+      });
 
       if (showLogs) {
         setInterval(() => {
