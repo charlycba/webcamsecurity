@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "echo \"No tests yet\" && exit 0"
+    "test": "echo \"No tests yet\" && exit 0",
+    "test:e2e": "echo \"E2E tests pending\" && exit 0",
+    "test:load": "echo \"Load tests pending\" && exit 0"
   },
   "dependencies": {
     "express": "^4.19.2",
