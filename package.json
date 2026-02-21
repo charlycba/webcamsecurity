@@ -4,7 +4,8 @@
   "description": "Phone-as-camera web app with HTTPS",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "echo \"No tests yet\" && exit 0"
   },
   "dependencies": {
     "express": "^4.19.2",
