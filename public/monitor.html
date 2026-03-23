@@ -167,6 +167,9 @@
       let rtcPeer = null;
       let rtcDataChannel = null;
       let webrtcActive = false;
+      let signalingSocket = null;
+      let viewerReadyTimer = null;
+      let reconnectTimer = null;
       let iceInCount = 0;
       let iceOutCount = 0;
       let statsTimer = null;
@@ -558,6 +561,32 @@
         resetStats();
       }
 
+      function stopViewerReadyLoop() {
+        if (viewerReadyTimer) {
+          clearInterval(viewerReadyTimer);
+          viewerReadyTimer = null;
+        }
+      }
+
+      function sendViewerReady() {
+        if (!signalingSocket || signalingSocket.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        signalingSocket.send(JSON.stringify({ type: "viewer-ready", ts: Date.now() }));
+      }
+
+      function startViewerReadyLoop() {
+        stopViewerReadyLoop();
+        sendViewerReady();
+        viewerReadyTimer = setInterval(() => {
+          if (webrtcActive) {
+            stopViewerReadyLoop();
+            return;
+          }
+          sendViewerReady();
+        }, 1500);
+      }
+
       async function updateIceInfo() {
         if (!rtcPeer) {
           return;
@@ -668,10 +697,16 @@
       function connectLive() {
         const protocol = window.location.protocol === "https:" ? "wss" : "ws";
         const socket = new WebSocket(`${protocol}://${window.location.host}`);
+        signalingSocket = socket;
 
         socket.addEventListener("open", () => {
+          if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+          }
           setStatus("Conectado a signaling.");
           addLog({ source: "signal", level: "info", message: "Conectado a signaling." });
+          startViewerReadyLoop();
         });
 
         socket.addEventListener("message", (event) => {
@@ -690,6 +725,7 @@
           }
 
           if (payload && payload.type === "webrtc-offer" && payload.sdp) {
+            stopViewerReadyLoop();
             handleOffer(socket, payload.sdp);
             return;
           }
@@ -705,12 +741,21 @@
         });
 
         socket.addEventListener("close", () => {
+          signalingSocket = null;
+          stopViewerReadyLoop();
           setStatus("Signaling desconectado.");
           addLog({ source: "signal", level: "warn", message: "Signaling desconectado." });
           stopWebRtc();
+          if (!reconnectTimer) {
+            reconnectTimer = setTimeout(() => {
+              reconnectTimer = null;
+              connectLive();
+            }, 1200);
+          }
         });
 
         socket.addEventListener("error", () => {
+          stopViewerReadyLoop();
           setStatus("Error en signaling.");
           addLog({ source: "signal", level: "error", message: "Error en signaling." });
           stopWebRtc();

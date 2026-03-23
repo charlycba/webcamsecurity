@@ -12,6 +12,13 @@ let rtcPeer = null;
 let rtcSender = null;
 let rtcDataChannel = null;
 let rtcMetaTimer = null;
+let snapshotTimer = null;
+let snapshotUploadInFlight = false;
+let renegotiationInProgress = false;
+let pendingRenegotiation = false;
+let awaitingAnswer = false;
+let signalReconnectTimer = null;
+const snapshotCanvas = document.createElement("canvas");
 let currentQuality = "medium";
 
 const QUALITY_PRESETS = {
@@ -42,6 +49,86 @@ function setStatus(message) {
   statusEl.textContent = message;
 }
 
+function stopSnapshotLoop() {
+  if (snapshotTimer) {
+    clearInterval(snapshotTimer);
+    snapshotTimer = null;
+  }
+}
+
+function blobToArrayBuffer(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(blob);
+  });
+}
+
+async function pushSnapshotFrame() {
+  if (!stream || !video.srcObject || video.readyState < 2 || snapshotUploadInFlight) {
+    return;
+  }
+
+  const width = video.videoWidth || 0;
+  const height = video.videoHeight || 0;
+  if (width === 0 || height === 0) {
+    return;
+  }
+
+  snapshotUploadInFlight = true;
+  try {
+    snapshotCanvas.width = width;
+    snapshotCanvas.height = height;
+    const ctx = snapshotCanvas.getContext("2d", { alpha: false });
+    if (!ctx) {
+      return;
+    }
+    ctx.drawImage(video, 0, 0, width, height);
+
+    let payload = null;
+    if (typeof snapshotCanvas.toBlob === "function") {
+      payload = await new Promise((resolve) => {
+        snapshotCanvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.85);
+      });
+    }
+
+    if (!payload) {
+      const dataUrl = snapshotCanvas.toDataURL("image/jpeg", 0.85);
+      const base64 = dataUrl.split(",")[1];
+      const bin = atob(base64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i += 1) {
+        bytes[i] = bin.charCodeAt(i);
+      }
+      payload = bytes.buffer;
+    } else {
+      payload = await blobToArrayBuffer(payload);
+    }
+
+    await fetch("/api/snapshot-frame", {
+      method: "POST",
+      headers: {
+        "Content-Type": "image/jpeg"
+      },
+      body: payload
+    });
+  } catch (_error) {
+    return;
+  } finally {
+    snapshotUploadInFlight = false;
+  }
+}
+
+function startSnapshotLoop() {
+  if (snapshotTimer) {
+    return;
+  }
+  snapshotTimer = setInterval(() => {
+    pushSnapshotFrame();
+  }, 1000);
+}
+
 async function startCamera() {
   try {
     const preset = QUALITY_PRESETS[currentQuality];
@@ -61,6 +148,7 @@ async function startCamera() {
     stopBtn.disabled = false;
     switchBtn.disabled = false;
     await startWebRtc();
+    startSnapshotLoop();
     setStatus("Camara activa.");
   } catch (error) {
     console.error(error);
@@ -77,7 +165,12 @@ function stopCamera() {
   startBtn.disabled = false;
   stopBtn.disabled = true;
   switchBtn.disabled = true;
+  stopSnapshotLoop();
   stopWebRtc();
+  if (signalReconnectTimer) {
+    clearTimeout(signalReconnectTimer);
+    signalReconnectTimer = null;
+  }
   if (signalSocket) {
     signalSocket.close();
     signalSocket = null;
@@ -107,7 +200,16 @@ function openSignalSocket() {
     }
 
     if (payload && payload.type === "webrtc-answer" && rtcPeer) {
+      awaitingAnswer = false;
       await rtcPeer.setRemoteDescription(payload.sdp);
+      return;
+    }
+
+    if (payload && payload.type === "viewer-ready" && stream) {
+      if (awaitingAnswer) {
+        return;
+      }
+      await triggerRenegotiation();
       return;
     }
 
@@ -123,16 +225,58 @@ function openSignalSocket() {
   signalSocket.addEventListener("close", () => {
     signalSocket = null;
     stopWebRtc();
+    scheduleSignalReconnect();
   });
 
   signalSocket.addEventListener("error", () => {
     setStatus("Error en signaling.");
+    scheduleSignalReconnect();
   });
 }
 
 function sendSignal(payload) {
   if (signalSocket && signalSocket.readyState === WebSocket.OPEN) {
     signalSocket.send(JSON.stringify(payload));
+  }
+}
+
+function scheduleSignalReconnect() {
+  if (!stream || signalReconnectTimer) {
+    return;
+  }
+  signalReconnectTimer = setTimeout(async () => {
+    signalReconnectTimer = null;
+    try {
+      openSignalSocket();
+      await triggerRenegotiation();
+    } catch (error) {
+      console.warn("No se pudo reconectar signaling.", error);
+      scheduleSignalReconnect();
+    }
+  }, 1200);
+}
+
+async function triggerRenegotiation() {
+  if (!stream) {
+    return;
+  }
+  if (renegotiationInProgress) {
+    pendingRenegotiation = true;
+    return;
+  }
+
+  renegotiationInProgress = true;
+  try {
+    await startWebRtc();
+  } catch (error) {
+    console.warn("Renegociacion WebRTC fallida.", error);
+  } finally {
+    renegotiationInProgress = false;
+  }
+
+  if (pendingRenegotiation) {
+    pendingRenegotiation = false;
+    await triggerRenegotiation();
   }
 }
 
@@ -265,11 +409,13 @@ async function startWebRtc() {
 
   const offer = await rtcPeer.createOffer({ offerToReceiveVideo: false, offerToReceiveAudio: false });
   await rtcPeer.setLocalDescription(offer);
+  awaitingAnswer = true;
   sendSignal({ type: "webrtc-offer", sdp: rtcPeer.localDescription });
 }
 
 function stopWebRtc() {
   stopRtcMetaLoop();
+  awaitingAnswer = false;
   if (rtcDataChannel) {
     rtcDataChannel.close();
     rtcDataChannel = null;

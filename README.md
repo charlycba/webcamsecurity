@@ -32,6 +32,29 @@ Monitor (video en vivo):
 https://IP_DEL_HOST:8443/monitor.html
 ```
 
+Snapshot (imagen JPEG instantanea):
+
+```
+http://IP_DEL_HOST:8080/api/snapshot
+```
+
+Tambien disponible en:
+
+```
+http://IP_DEL_HOST:80/api/snapshot
+```
+
+Variables de entorno para snapshot:
+
+- `SNAPSHOT_SOURCE`: origen de video para FFmpeg. Ejemplos: `rtsp://usuario:pass@ip/stream` o `/dev/video0`.
+- `SNAPSHOT_TIMEOUT_MS`: timeout maximo en ms (por defecto `5000`).
+
+Comportamiento del endpoint `/api/snapshot`:
+
+- Primero intenta devolver el ultimo frame JPEG subido por el cliente emisor activo (en memoria, sin disco).
+- Si no hay frame reciente, usa fallback con FFmpeg.
+- Si no hay senal disponible en ninguno de los dos, responde `503` con `{"error":"Camera not available"}`.
+
 ## Controles del monitor
 - Boton de pantalla completa (doble click en el video tambien alterna fullscreen).
 - Zoom visual con slider, botones +/− y rueda del mouse.
