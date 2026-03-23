@@ -1,11 +1,13 @@
 const fs = require("fs");
 const path = require("path");
+const http = require("http");
 const https = require("https");
 const express = require("express");
-const { WebSocketServer } = require("ws");
+const { WebSocketServer, WebSocket } = require("ws");
 
 const app = express();
-const port = Number(process.env.PORT || 8443);
+const httpsPort = Number(process.env.PORT || 8443);
+const httpPort = Number(process.env.HTTP_PORT || 8080);
 const certPath = process.env.CERT_PATH || path.join(__dirname, "certs", "local.crt");
 const keyPath = process.env.KEY_PATH || path.join(__dirname, "certs", "local.key");
 
@@ -17,16 +19,31 @@ if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/vendor", express.static(path.join(__dirname, "node_modules", "qrcodejs")));
 
+app.get(["/monitor", "/monitor.htm"], (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "monitor.html"));
+});
+
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
-const server = https.createServer({
+const httpsServer = https.createServer({
   cert: fs.readFileSync(certPath),
   key: fs.readFileSync(keyPath)
 }, app);
 
-const wss = new WebSocketServer({ server });
+const httpServer = http.createServer(app);
+
+const wsServers = [];
+
+function createWsServer(server) {
+  const wsServer = new WebSocketServer({ server });
+  wsServers.push(wsServer);
+  return wsServer;
+}
+
+const wssSecure = createWsServer(httpsServer);
+const wssInsecure = createWsServer(httpServer);
 const nativeConsole = {
   log: console.log.bind(console),
   info: console.info.bind(console),
@@ -41,10 +58,12 @@ function broadcastServerLog(level, message) {
     message,
     ts: Date.now()
   });
-  wss.clients.forEach((client) => {
-    if (client.readyState === client.OPEN) {
-      client.send(payload);
-    }
+  wsServers.forEach((wsServer) => {
+    wsServer.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
+    });
   });
 }
 
@@ -66,14 +85,16 @@ function broadcastServerLog(level, message) {
 });
 
 function broadcast(data, exceptSocket) {
-  wss.clients.forEach((client) => {
-    if (client !== exceptSocket && client.readyState === client.OPEN) {
-      client.send(data);
-    }
+  wsServers.forEach((wsServer) => {
+    wsServer.clients.forEach((client) => {
+      if (client !== exceptSocket && client.readyState === WebSocket.OPEN) {
+        client.send(data);
+      }
+    });
   });
 }
 
-wss.on("connection", (socket) => {
+function handleWsConnection(socket) {
   console.info("WebSocket conectado.");
   let iceCount = 0;
 
@@ -105,8 +126,15 @@ wss.on("connection", (socket) => {
       return;
     }
   });
+}
+
+wssSecure.on("connection", handleWsConnection);
+wssInsecure.on("connection", handleWsConnection);
+
+httpsServer.listen(httpsPort, "0.0.0.0", () => {
+  console.log(`HTTPS server listening on port ${httpsPort}`);
 });
 
-server.listen(port, "0.0.0.0", () => {
-  console.log(`HTTPS server listening on port ${port}`);
+httpServer.listen(httpPort, "0.0.0.0", () => {
+  console.log(`HTTP server listening on port ${httpPort}`);
 });
